@@ -113,14 +113,54 @@ speechSynthesis.onvoiceschanged = () => {
 
 function speak(text) {
   const cfg = window.voiceConfig || {};
+  // If server TTS is enabled, send request to backend and play audio
+  if (cfg.useServerTTS && cfg.serverUrl) {
+    // show synthesizing message
+    const busy = document.createElement('div');
+    busy.className = 'message ai';
+    busy.textContent = 'Synthesizing audio...';
+    chatThread.appendChild(busy);
+    chatThread.scrollTop = chatThread.scrollHeight;
+
+    const payload = { text };
+    const headers = { 'Content-Type': 'application/json' };
+    if (cfg.serverToken) headers['X-TTS-TOKEN'] = cfg.serverToken;
+
+    fetch(cfg.serverUrl, { method: 'POST', headers, body: JSON.stringify(payload) })
+      .then(r => {
+        if (!r.ok) throw new Error('TTS server error');
+        return r.blob();
+      })
+      .then(blob => {
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = () => { URL.revokeObjectURL(url); busy.remove(); };
+        audio.onerror = () => { URL.revokeObjectURL(url); busy.remove(); console.error('Audio playback error'); };
+        audio.play();
+      })
+      .catch(err => {
+        console.error('Server TTS failed', err);
+        busy.textContent = 'Server TTS failed, falling back to browser TTS.';
+        setTimeout(() => { try { busy.remove(); } catch(e){} }, 2000);
+        // fallback to browser TTS
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = cfg.lang || 'en-US';
+        utterance.rate = cfg.rate || 1;
+        utterance.pitch = cfg.pitch || 1;
+        if (!window._preferredVoice) _selectPreferredVoice();
+        if (window._preferredVoice) utterance.voice = window._preferredVoice;
+        speechSynthesis.speak(utterance);
+      });
+    return;
+  }
+
+  // Browser TTS fallback
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = cfg.lang || 'en-US';
   utterance.rate = cfg.rate || 1;
   utterance.pitch = cfg.pitch || 1;
   if (!window._preferredVoice) _selectPreferredVoice();
   if (window._preferredVoice) utterance.voice = window._preferredVoice;
-  // personality hooks: placeholder for modern neural TTS controls
-  // e.g., cfg.sarcasm=true could map to pitch/rate changes or SSML in future
   speechSynthesis.speak(utterance);
 }
 

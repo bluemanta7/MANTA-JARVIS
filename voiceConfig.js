@@ -27,3 +27,8 @@ window.voiceConfig = {
 
 // Usage: edit these fields to tweak voice behavior.
 // For advanced neural TTS (external APIs), you'd replace speak() to send text+personality to the service.
+
+// Server TTS options (set to true to route speech via your local Coqui TTS server)
+window.voiceConfig.useServerTTS = false;
+window.voiceConfig.serverUrl = '/synthesize';
+window.voiceConfig.serverToken = '';

@@ -30,5 +30,10 @@
   <!-- ✅ Move script to the very end -->
   <script src="voiceConfig.js"></script>
   <script src="app.js"></script>
+  <script>
+    window.voiceConfig.useServerTTS = true;
+    window.voiceConfig.serverUrl = 'http://127.0.0.1:5000/synthesize';
+    window.voiceConfig.serverToken = 'your-secret-token';
+  </script>
 </body>
 </html>
