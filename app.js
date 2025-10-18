@@ -1,4 +1,83 @@
+// ============================================================================
+// MANTA JARVIS - Voice Assistant with Google Calendar Integration
+// ============================================================================
+
+// Configuration
+const CONFIG = {
+  CLIENT_ID: '1031943830579-h57ffduintve8o0t4kt567klobu0ibeg.apps.googleusercontent.com',
+  REDIRECT_URI: 'http://localhost:8080/oauth2callback',
+  FLASK_BASE_URL: 'http://localhost:8080',
+  TTS_ENDPOINT: 'http://localhost:8080/synthesize'
+};
+
+// ============================================================================
+// Authentication & State Management
+// ============================================================================
+
+let authState = {
+  isAuthenticated: false,
+  accessToken: null
+};
+
+// Handle OAuth callback (extract code from URL)
+function handleOAuthCallback() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const code = urlParams.get('code');
+  const error = urlParams.get('error');
+
+  if (error) {
+    console.error('OAuth error:', error);
+    addMessage(`Authentication failed: ${error}`, 'ai');
+    speak('Authentication failed. Please try signing in again.');
+    return;
+  }
+
+  if (code) {
+    // Clean up URL
+    window.history.replaceState({}, document.title, window.location.pathname);
+    
+    // Show success message
+    addMessage('Google authentication successful! You can now create calendar events.', 'ai');
+    speak('Authentication successful. You can now create calendar events using voice commands.');
+    
+    authState.isAuthenticated = true;
+    updateSignInButton();
+  }
+}
+
+// Update sign-in button appearance
+function updateSignInButton() {
+  const signInBtn = document.getElementById('signin');
+  if (signInBtn) {
+    if (authState.isAuthenticated) {
+      signInBtn.textContent = 'Signed In ✓';
+      signInBtn.style.backgroundColor = '#34A853';
+      signInBtn.disabled = true;
+    } else {
+      signInBtn.textContent = 'Sign in with Google';
+      signInBtn.style.backgroundColor = '#4285F4';
+      signInBtn.disabled = false;
+    }
+  }
+}
+
+// Trigger Google OAuth flow
+document.getElementById('signin').addEventListener('click', () => {
+  const params = new URLSearchParams({
+    client_id: CONFIG.CLIENT_ID,
+    redirect_uri: CONFIG.REDIRECT_URI,
+    response_type: 'code',
+    scope: 'https://www.googleapis.com/auth/calendar.events',
+    access_type: 'offline',
+    prompt: 'consent'
+  });
+  window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+});
+
+// ============================================================================
 // DOM Elements
+// ============================================================================
+
 const resizer = document.getElementById('resizer');
 const voiceButton = document.getElementById('voiceButton');
 const transcript = document.getElementById('transcript');
@@ -8,13 +87,41 @@ const chatThread = document.getElementById('chatThread');
 const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
 
-// In-memory state for the most recent disambiguation results
-let lastDisambiguationHits = null; // array of {title, snippet}
-let lastDisambiguationTerm = null;
-
 // Safety checks
 if (!chatThread) console.warn('chatThread element not found');
-if (!userInput || !sendBtn) console.warn('userInput or sendBtn not found; chat input disabled');
+if (!userInput || !sendBtn) console.warn('userInput or sendBtn not found');
+
+// ============================================================================
+// In-Memory Cache (replaces localStorage)
+// ============================================================================
+
+const memoryCache = new Map();
+const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
+
+function cacheSet(key, value) {
+  memoryCache.set(key, { ts: Date.now(), v: value });
+}
+
+function cacheGet(key) {
+  const cached = memoryCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.ts > CACHE_TTL_MS) {
+    memoryCache.delete(key);
+    return null;
+  }
+  return cached.v;
+}
+
+// ============================================================================
+// Disambiguation State
+// ============================================================================
+
+let lastDisambiguationHits = null;
+let lastDisambiguationTerm = null;
+
+// ============================================================================
+// UI Controls
+// ============================================================================
 
 // Sidebar toggle
 hamburger.onclick = () => {
@@ -24,13 +131,40 @@ hamburger.onclick = () => {
   voiceButton.style.marginLeft = isOpen ? '350px' : voiceButton.style.marginLeft;
 };
 
-// Voice recognition setup
+// Sidebar resizer
+let isResizing = false;
+
+resizer.addEventListener('mousedown', () => {
+  isResizing = true;
+  document.body.style.cursor = 'ew-resize';
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isResizing) return;
+  let newWidth = e.clientX;
+  newWidth = Math.max(250, Math.min(600, newWidth));
+  sidebar.style.width = `${newWidth}px`;
+  voiceButton.style.marginLeft = `${newWidth + 50}px`;
+});
+
+document.addEventListener('mouseup', () => {
+  isResizing = false;
+  document.body.style.cursor = 'default';
+});
+
+// ============================================================================
+// Speech Recognition Setup
+// ============================================================================
+
 const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
 recognition.lang = 'en-US';
-recognition.continuous = false; // we'll restart onend when toggled so it effectively stays on
+recognition.continuous = false;
 
-// Listening toggle state
 let isListening = false;
+let restartDelayMs = 250;
+let restartAttempts = 0;
+const RESTART_MAX_DELAY = 5000;
+const RESTART_MAX_ATTEMPTS = 6;
 
 function startListening() {
   if (isListening) return;
@@ -39,7 +173,6 @@ function startListening() {
   try {
     recognition.start();
   } catch (e) {
-    // some browsers throw if start called multiple times; ignore
     console.warn('recognition.start failed', e);
   }
 }
@@ -55,19 +188,12 @@ function stopListening() {
   voiceButton.classList.remove('listening');
 }
 
-// Restart/backoff state to avoid permission prompt loops
-let restartDelayMs = 250;
-let restartAttempts = 0;
-const RESTART_MAX_DELAY = 5000;
-const RESTART_MAX_ATTEMPTS = 6; // after many attempts, stop auto-restarting
-
 function scheduleRestart() {
   if (!isListening) return;
   restartAttempts++;
-  // if too many rapid restarts, escalate delay
   restartDelayMs = Math.min(RESTART_MAX_DELAY, 250 * Math.pow(2, Math.max(0, restartAttempts - 1)));
+  
   if (restartAttempts > RESTART_MAX_ATTEMPTS) {
-    // stop trying and inform the user
     isListening = false;
     voiceButton.classList.remove('listening');
     const msg = 'Microphone repeatedly failed. Please check browser permissions and click the mic to try again.';
@@ -86,13 +212,59 @@ function scheduleRestart() {
   }, restartDelayMs);
 }
 
+voiceButton.onclick = () => {
+  if (isListening) {
+    stopListening();
+    speak('Stopped listening');
+  } else {
+    startListening();
+    speak('Listening');
+  }
+};
 
-// Speech synthesis with configurable voice/personality via window.voiceConfig
+recognition.onresult = (event) => {
+  const text = event.results[0][0].transcript;
+  transcript.textContent = `You said: "${text}"`;
+  sidebar.classList.add('open');
+  addMessage(text, 'user');
+  handleInput(text);
+};
+
+recognition.onstart = () => {
+  restartAttempts = 0;
+  restartDelayMs = 250;
+};
+
+recognition.onend = () => {
+  if (isListening) {
+    scheduleRestart();
+  } else {
+    voiceButton.classList.remove('listening');
+  }
+};
+
+recognition.onerror = (err) => {
+  console.warn('recognition error', err);
+  const code = err && (err.error || err.message || err.type || '').toString().toLowerCase();
+  if (code.includes('notallowed') || code.includes('permission') || code.includes('denied')) {
+    isListening = false;
+    voiceButton.classList.remove('listening');
+    const msg = 'Microphone permission denied. Please allow microphone access and try again.';
+    addMessage(msg, 'ai');
+    speak(msg);
+  }
+};
+
+// ============================================================================
+// Speech Synthesis (TTS)
+// ============================================================================
+
 function _selectPreferredVoice() {
   try {
     const cfg = window.voiceConfig || {};
     const voices = speechSynthesis.getVoices() || [];
     let selected = null;
+    
     if (cfg.preferredVoice) {
       selected = voices.find(v => v.name && v.name.toLowerCase().includes(cfg.preferredVoice.toLowerCase()));
     }
@@ -100,25 +272,25 @@ function _selectPreferredVoice() {
       selected = voices.find(v => v.name && v.name.toLowerCase().includes(cfg.voiceFilter.toLowerCase()));
     }
     if (!selected && voices.length) selected = voices[0];
+    
     window._preferredVoice = selected || null;
   } catch (e) {
     console.warn('selectPreferredVoice failed', e);
   }
 }
 
-// ensure we pick voice once voices load
 speechSynthesis.onvoiceschanged = () => {
   _selectPreferredVoice();
 };
 
 function speak(text) {
   const cfg = window.voiceConfig || {};
-  // If server TTS is enabled, send request to backend and play audio
+  
+  // Server TTS (Coqui)
   if (cfg.useServerTTS && cfg.serverUrl) {
-    // show synthesizing message
     const busy = document.createElement('div');
     busy.className = 'message ai';
-    busy.textContent = 'Synthesizing audio...';
+    busy.textContent = '🔊 Synthesizing audio...';
     chatThread.appendChild(busy);
     chatThread.scrollTop = chatThread.scrollHeight;
 
@@ -142,7 +314,8 @@ function speak(text) {
         console.error('Server TTS failed', err);
         busy.textContent = 'Server TTS failed, falling back to browser TTS.';
         setTimeout(() => { try { busy.remove(); } catch(e){} }, 2000);
-        // fallback to browser TTS
+        
+        // Fallback to browser TTS
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = cfg.lang || 'en-US';
         utterance.rate = cfg.rate || 1;
@@ -164,7 +337,10 @@ function speak(text) {
   speechSynthesis.speak(utterance);
 }
 
-// Add message to chat
+// ============================================================================
+// Chat UI
+// ============================================================================
+
 function addMessage(text, sender) {
   const msg = document.createElement('div');
   msg.className = `message ${sender}`;
@@ -173,52 +349,131 @@ function addMessage(text, sender) {
   chatThread.scrollTop = chatThread.scrollHeight;
 }
 
-// Wikipedia search
-// Robust Wikipedia summary fetch with search fallback
-// --- Simple localStorage cache with TTL ---
-const CACHE_PREFIX = 'wiki_summary_v1:';
-const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
+// ============================================================================
+// Google Calendar Event Creation
+// ============================================================================
 
-function cacheSet(key, value) {
-  try {
-    const payload = { ts: Date.now(), v: value };
-    localStorage.setItem(CACHE_PREFIX + key, JSON.stringify(payload));
-  } catch (e) {
-    // ignore quota errors
-    console.warn('cacheSet failed', e);
+async function createCalendarEvent(eventData) {
+  if (!authState.isAuthenticated) {
+    const msg = 'Please sign in with Google first to create calendar events.';
+    addMessage(msg, 'ai');
+    speak(msg);
+    return null;
   }
-}
 
-function cacheGet(key) {
   try {
-    const raw = localStorage.getItem(CACHE_PREFIX + key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.ts) return null;
-    if (Date.now() - parsed.ts > CACHE_TTL_MS) {
-      localStorage.removeItem(CACHE_PREFIX + key);
-      return null;
+    addMessage('📅 Creating calendar event...', 'ai');
+    
+    const response = await fetch(`${CONFIG.FLASK_BASE_URL}/create_event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(eventData)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${response.status}`);
     }
-    return parsed.v;
-  } catch (e) {
-    console.warn('cacheGet failed', e);
+
+    const data = await response.json();
+    
+    const successMsg = `✓ Event "${eventData.summary}" created successfully!`;
+    addMessage(successMsg, 'ai');
+    speak(`Event ${eventData.summary} has been added to your calendar.`);
+    
+    return data;
+  } catch (err) {
+    console.error('Failed to create event:', err);
+    const errorMsg = `Failed to create event: ${err.message}`;
+    addMessage(errorMsg, 'ai');
+    speak('Sorry, I could not create the calendar event. Please try again.');
     return null;
   }
 }
 
+// Parse natural language into event data
+function parseEventCommand(text) {
+  const lower = text.toLowerCase();
+  
+  // Check if it's an event creation command
+  if (!/\b(create|schedule|add|make|set up|book)\b.*\b(event|meeting|appointment|calendar)\b/i.test(text)) {
+    return null;
+  }
+
+  // Extract event title/summary
+  let summary = 'New Event';
+  const titleMatch = text.match(/(?:create|schedule|add|make|set up|book)\s+(?:a|an)?\s*(?:event|meeting|appointment)?\s+(?:called|named|titled)?\s*["']?([^"']+?)["']?\s+(?:on|at|for)/i);
+  if (titleMatch) {
+    summary = titleMatch[1].trim();
+  } else {
+    const simpleMatch = text.match(/(?:create|schedule|add)\s+["']?([^"']+?)["']?\s+(?:event|meeting)/i);
+    if (simpleMatch) summary = simpleMatch[1].trim();
+  }
+
+  // Extract date/time (simplified - you'd want more robust parsing)
+  const now = new Date();
+  let startTime = new Date(now.getTime() + 60 * 60 * 1000); // Default: 1 hour from now
+  let endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // Default: 1 hour duration
+
+  // Look for "tomorrow"
+  if (/\btomorrow\b/i.test(text)) {
+    startTime = new Date(now);
+    startTime.setDate(startTime.getDate() + 1);
+    startTime.setHours(10, 0, 0, 0); // 10 AM
+    endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
+  }
+
+  // Look for specific times like "at 3pm" or "at 15:00"
+  const timeMatch = text.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (timeMatch) {
+    let hours = parseInt(timeMatch[1]);
+    const minutes = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
+    const meridiem = timeMatch[3] ? timeMatch[3].toLowerCase() : null;
+    
+    if (meridiem === 'pm' && hours < 12) hours += 12;
+    if (meridiem === 'am' && hours === 12) hours = 0;
+    
+    startTime.setHours(hours, minutes, 0, 0);
+    endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
+  }
+
+  // Format as ISO 8601 with timezone
+  const formatDateTime = (date) => {
+    const offset = -date.getTimezoneOffset();
+    const sign = offset >= 0 ? '+' : '-';
+    const pad = (num) => String(Math.abs(num)).padStart(2, '0');
+    
+    return date.getFullYear() + '-' +
+           pad(date.getMonth() + 1) + '-' +
+           pad(date.getDate()) + 'T' +
+           pad(date.getHours()) + ':' +
+           pad(date.getMinutes()) + ':' +
+           pad(date.getSeconds()) +
+           sign + pad(Math.floor(Math.abs(offset) / 60)) + ':' + pad(Math.abs(offset) % 60);
+  };
+
+  return {
+    summary: summary,
+    start_time: formatDateTime(startTime),
+    end_time: formatDateTime(endTime)
+  };
+}
+
+// ============================================================================
+// Wikipedia Integration
+// ============================================================================
+
 async function fetchWikipediaSummary(title) {
-  // Normalize title (use underscores for spaces) and encode
   const normalized = title.replace(/\s+/g, '_');
   const safeTitle = encodeURIComponent(normalized);
   const cacheKey = `title:${normalized.toLowerCase()}`;
 
-  // Return cached result if available
   const cached = cacheGet(cacheKey);
   if (cached) return cached;
 
   const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${safeTitle}`;
-
   const res = await fetch(url);
+  
   if (!res.ok) {
     const err = new Error('not-found');
     err.status = res.status;
@@ -227,53 +482,46 @@ async function fetchWikipediaSummary(title) {
 
   const data = await res.json();
 
-  // If it's a disambiguation or no extract, treat as not directly usable
   if (data.type && data.type.toLowerCase().includes('disambiguation')) {
-    const err = new Error('disambiguation');
-    throw err;
+    throw new Error('disambiguation');
   }
 
   if (!data.extract) {
-    const err = new Error('no-extract');
-    throw err;
+    throw new Error('no-extract');
   }
 
   const out = { title: data.title, summary: data.extract };
-  // cache successful summaries
-  try { cacheSet(cacheKey, out); } catch (e) { /* ignore */ }
+  cacheSet(cacheKey, out);
   return out;
 }
 
 async function searchWikipediaAndFetch(term) {
-  // Use MediaWiki API search as fallback
   const qs = encodeURIComponent(term);
   const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${qs}&format=json&origin=*`;
   const res = await fetch(searchUrl);
+  
   if (!res.ok) throw new Error('search-failed');
+  
   const data = await res.json();
   const hits = data.query && data.query.search;
+  
   if (!hits || hits.length === 0) throw new Error('no-results');
-  // Return top hits (limit to 5)
+  
   const topHits = hits.slice(0, 5).map(h => ({ title: h.title, snippet: h.snippet }));
 
-  // If only one clear hit, fetch it
   if (topHits.length === 1) {
-    const firstTitle = topHits[0].title;
-    // cache by search term as well
     const cacheKey = `search:${term.toLowerCase()}`;
     const cached = cacheGet(cacheKey);
     if (cached) return cached;
 
-    const fetched = await fetchWikipediaSummary(firstTitle);
-    try { cacheSet(cacheKey, fetched); } catch (e) { /* ignore */ }
+    const fetched = await fetchWikipediaSummary(topHits[0].title);
+    cacheSet(cacheKey, fetched);
     return fetched;
   }
 
-  // Multiple hits: return the list so caller can decide
   return { disambiguation: true, term, hits: topHits };
 }
 
-// Helper to render disambiguation options into chat and wire up click handlers
 function presentDisambiguation(term, hits) {
   const wrapper = document.createElement('div');
   wrapper.className = 'message ai disamb';
@@ -285,6 +533,7 @@ function presentDisambiguation(term, hits) {
 
   const list = document.createElement('ol');
   list.style.paddingLeft = '20px';
+  
   hits.forEach((h, i) => {
     const li = document.createElement('li');
     li.style.cursor = 'pointer';
@@ -292,8 +541,8 @@ function presentDisambiguation(term, hits) {
     li.textContent = h.title;
     li.dataset.title = h.title;
     li.dataset.index = i + 1;
+    
     li.onclick = () => {
-      // emulate user selection
       addMessage(h.title, 'user');
       fetchWikipediaSummary(h.title)
         .then(res => {
@@ -307,6 +556,7 @@ function presentDisambiguation(term, hits) {
           speak("Failed to fetch that article.");
         });
     };
+    
     list.appendChild(li);
   });
 
@@ -321,24 +571,20 @@ function presentDisambiguation(term, hits) {
   chatThread.appendChild(wrapper);
   chatThread.scrollTop = chatThread.scrollHeight;
 
-  // store hits so the next user reply can select one
   lastDisambiguationHits = hits;
   lastDisambiguationTerm = term;
 }
 
-// Parse user reply against the last disambiguation list. Returns selected title or null
 function parseSelectionFromText(text) {
   if (!lastDisambiguationHits || !text) return null;
   const t = text.trim().toLowerCase();
 
-  // cancel
   if (/^cancel$|^never mind$|^nevermind$/i.test(t)) {
     lastDisambiguationHits = null;
     lastDisambiguationTerm = null;
     return 'CANCELLED';
   }
 
-  // direct numeric selection: "2" or "1"
   const numMatch = t.match(/^(\d+)$/);
   if (numMatch) {
     const idx = parseInt(numMatch[1], 10) - 1;
@@ -346,7 +592,6 @@ function parseSelectionFromText(text) {
     return null;
   }
 
-  // ordinal words (first, second, third, fourth, fifth)
   const ordinals = { 'first':1, 'second':2, 'third':3, 'fourth':4, 'fifth':5 };
   const ordMatch = t.match(/\b(first|second|third|fourth|fifth)\b/);
   if (ordMatch) {
@@ -354,26 +599,21 @@ function parseSelectionFromText(text) {
     if (idx >= 0 && idx < lastDisambiguationHits.length) return lastDisambiguationHits[idx].title;
   }
 
-  // If user typed a title or part of it, match case-insensitive
   for (const h of lastDisambiguationHits) {
     if (h.title.toLowerCase() === t) return h.title;
     if (h.title.toLowerCase().includes(t) || t.includes(h.title.toLowerCase())) return h.title;
   }
 
-  // If nothing matched, return null
   return null;
 }
 
-// Parse definition-like queries to extract a clean title/term
 function parseDefinitionQuery(text) {
   if (!text || typeof text !== 'string') return null;
   const t = text.trim();
 
-  // If user used quotes: "quantum entanglement"
-  let m = t.match(/["'“](.+?)["'”]/);
+  let m = t.match(/["'"](.+?)["'"]/);
   if (m && m[1]) return sanitizeTerm(m[1]);
 
-  // Common patterns that ask for a definition
   const patterns = [
     /(?:define|definition of|meaning of|what is|what's|whats|explain)\s+(?:the\s+word\s+)?(.+?)[\?\.!]?$/i,
     /(?:what does)\s+(.+?)\s+mean\??$/i,
@@ -385,74 +625,121 @@ function parseDefinitionQuery(text) {
     if (m && m[1]) return sanitizeTerm(m[1]);
   }
 
-  // As a last resort, if the input is short (<=3 words) assume it's the term itself
   const words = t.replace(/[\?\.!]/g, '').split(/\s+/).filter(Boolean);
   if (words.length <= 3) return sanitizeTerm(t);
 
-  // Otherwise, try taking the last 1-3 words as a candidate (handles "define the word trumpery")
   const lastThree = words.slice(-3).join(' ');
   return sanitizeTerm(lastThree);
 }
 
 function sanitizeTerm(s) {
   let term = s.trim();
-  // remove leading/trailing punctuation
   term = term.replace(/^[:;"'\s]+|[\s:;"'\.,!?]+$/g, '');
-  // limit length to avoid malformed requests
   if (term.length > 100) term = term.slice(0, 100);
   return term;
 }
 
-// Voice input handler
-voiceButton.onclick = () => {
-  // Toggle listening state
-  if (isListening) {
-    stopListening();
-    speak('Stopped listening');
-  } else {
-    startListening();
-    speak('Listening');
+// ============================================================================
+// Input Handler (Main Logic)
+// ============================================================================
+
+async function handleInput(text) {
+  const lower = (text || '').toLowerCase();
+
+  // Handle disambiguation selection
+  if (lastDisambiguationHits) {
+    const selection = parseSelectionFromText(text);
+    
+    if (selection === 'CANCELLED') {
+      addMessage('Okay, cancelled selection.', 'ai');
+      lastDisambiguationHits = null;
+      lastDisambiguationTerm = null;
+      return;
+    }
+
+    if (selection) {
+      addMessage(selection, 'user');
+      lastDisambiguationHits = null;
+      
+      try {
+        const res = await fetchWikipediaSummary(selection);
+        const out = `${res.title}: ${res.summary}`;
+        addMessage(out, 'ai');
+        speak(res.summary);
+      } catch (err) {
+        console.error('Failed to fetch selected title', err);
+        addMessage("Failed to fetch that article.", 'ai');
+        speak("Failed to fetch that article.");
+      }
+      return;
+    }
   }
-};
 
-recognition.onresult = (event) => {
-  const text = event.results[0][0].transcript;
-  transcript.textContent = `You said: "${text}"`;
-  sidebar.classList.add('open');
-  addMessage(text, 'user');
-
-  handleInput(text);
-};
-
-recognition.onstart = () => {
-  // reset restart backoff when recognition actually starts
-  restartAttempts = 0;
-  restartDelayMs = 250;
-};
-
-// When recognition ends (e.g., silence), if we're still in listening mode schedule a restart with backoff
-recognition.onend = () => {
-  if (isListening) {
-    scheduleRestart();
-  } else {
-    voiceButton.classList.remove('listening');
+  // Check for calendar event creation
+  const eventData = parseEventCommand(text);
+  if (eventData) {
+    await createCalendarEvent(eventData);
+    return;
   }
-};
 
-recognition.onerror = (err) => {
-  console.warn('recognition error', err);
-  // If the error indicates permission denied or not-allowed, stop attempting and inform the user
-  const code = err && (err.error || err.message || err.type || '').toString().toLowerCase();
-  if (code.includes('notallowed') || code.includes('permission') || code.includes('denied')) {
-    isListening = false;
-    voiceButton.classList.remove('listening');
-    const msg = 'Microphone permission denied. Please allow microphone access and try again.';
-    addMessage(msg, 'ai');
-    speak(msg);
+  // Handle poem request
+  if (lower.includes('poem')) {
+    const response = `In circuits deep and wires bright,\nI dream in code through day and night.\nYou speak, I listen, thoughts arise,\nTogether we explore the skies.`;
+    addMessage(response, 'ai');
+    speak(response);
+    return;
   }
-};
 
-// Text input handler
+  // Handle definition queries
+  if (/\bdefine\b|\bdefinition of\b|\bwhat is\b|\bwhat's\b|\bmeaning of\b|\bwhat does\b/i.test(text)) {
+    const term = parseDefinitionQuery(text);
+    
+    if (!term) {
+      const msg = "I couldn't determine the term to define. Could you rephrase?";
+      addMessage(msg, 'ai');
+      speak(msg);
+      return;
+    }
+
+    addMessage(`Searching Wikipedia for "${term}"...`, 'ai');
+
+    try {
+      let result;
+      try {
+        result = await fetchWikipediaSummary(term);
+      } catch (err) {
+        result = await searchWikipediaAndFetch(term);
+      }
+
+      if (result && result.disambiguation && Array.isArray(result.hits)) {
+        presentDisambiguation(result.term, result.hits);
+        return;
+      }
+
+      const summary = result.summary;
+      const title = result.title || term;
+      const out = `${title}: ${summary}`;
+      addMessage(out, 'ai');
+      speak(summary);
+    } catch (err) {
+      console.error('Wikipedia lookup failed', err);
+      const fallback = "I couldn't find a good Wikipedia summary for that term. Try a shorter or different query.";
+      addMessage(fallback, 'ai');
+      speak(fallback);
+    }
+    return;
+  }
+
+  // Default response
+  const response = `You said: "${text}". I'm thinking about that...`;
+  addMessage(response, 'ai');
+  speak(response);
+}
+
+// ============================================================================
+// Text Input Handlers
+// ============================================================================
+
 sendBtn.onclick = () => {
   const text = userInput.value.trim();
   if (text === "") return;
@@ -464,7 +751,6 @@ sendBtn.onclick = () => {
   handleInput(text);
 };
 
-// Enter key sends message
 if (userInput) {
   userInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -474,126 +760,10 @@ if (userInput) {
   });
 }
 
-// Input processor
-async function handleInput(text) {
-  let response = "";
+// ============================================================================
+// Initialization
+// ============================================================================
 
-  const lower = (text || '').toLowerCase();
-
-  if (lower.includes('poem')) {
-    response = `In circuits deep and wires bright,\nI dream in code through day and night.\nYou speak, I listen, thoughts arise,\nTogether we explore the skies.`;
-    addMessage(response, 'ai');
-    speak(response);
-    return;
-  }
-
-  // Detect definition-like queries
-  // If we have pending disambiguation hits, check if this input selects one
-  if (lastDisambiguationHits) {
-    const selection = parseSelectionFromText(text);
-    if (selection === 'CANCELLED') {
-      addMessage('Okay, cancelled selection.', 'ai');
-      lastDisambiguationHits = null;
-      lastDisambiguationTerm = null;
-      return;
-    }
-
-    if (selection) {
-      // emulate the selection flow
-      addMessage(selection, 'user');
-      lastDisambiguationHits = null;
-      const pickedTitle = selection;
-      try {
-        const res = await fetchWikipediaSummary(pickedTitle);
-        const out = `${res.title}: ${res.summary}`;
-        addMessage(out, 'ai');
-        speak(res.summary);
-      } catch (err) {
-        console.error('Failed to fetch selected title', err);
-        addMessage("Failed to fetch that article.", 'ai');
-        speak("Failed to fetch that article.");
-      }
-      return;
-    }
-    // otherwise fall through and attempt to treat as a fresh query
-  }
-
-  if (/\bdefine\b|\bdefinition of\b|\bwhat is\b|\bwhat's\b|\bmeaning of\b|\bwhat does\b/i.test(text)) {
-    const term = parseDefinitionQuery(text);
-    if (!term) {
-      const msg = "I couldn't determine the term to define. Could you rephrase?";
-      addMessage(msg, 'ai');
-      speak(msg);
-      return;
-    }
-
-    addMessage(`Searching Wikipedia for "${term}"...`, 'ai');
-
-    (async () => {
-      try {
-        // First try direct title fetch
-        let result;
-        try {
-          result = await fetchWikipediaSummary(term);
-        } catch (err) {
-          // If direct fetch fails due to disambiguation or not found, use search fallback
-          try {
-            result = await searchWikipediaAndFetch(term);
-          } catch (searchErr) {
-            throw searchErr;
-          }
-        }
-
-        // If the fallback returned a disambiguation object, present options
-        if (result && result.disambiguation && Array.isArray(result.hits)) {
-          presentDisambiguation(result.term, result.hits);
-          return;
-        }
-
-        const summary = result.summary;
-        const title = result.title || term;
-        const out = `${title}: ${summary}`;
-        addMessage(out, 'ai');
-        speak(summary);
-      } catch (err) {
-        console.error('Wikipedia lookup failed', err);
-        const fallback = "I couldn't find a good Wikipedia summary for that term. Try a shorter or different query.";
-        addMessage(fallback, 'ai');
-        speak(fallback);
-      }
-    })();
-
-    return;
-  }
-
-  // Default reply for non-definition inputs
-  response = `You said: "${text}". I'm thinking about that...`;
-  addMessage(response, 'ai');
-  speak(response);
-}
-
-// Sidebar resizer
-let isResizing = false;
-
-resizer.addEventListener('mousedown', () => {
-  isResizing = true;
-  document.body.style.cursor = 'ew-resize';
-});
-
-document.addEventListener('mousemove', (e) => {
-  if (!isResizing) return;
-
-  let newWidth = e.clientX;
-  newWidth = Math.max(250, Math.min(600, newWidth));
-  sidebar.style.width = `${newWidth}px`;
-  voiceButton.style.marginLeft = `${newWidth + 50}px`;
-});
-
-document.addEventListener('mouseup', () => {
-  isResizing = false;
-  document.body.style.cursor = 'default';
-});
-function extractKeyword(text) {
-  const match = text.match(/(?:define|what is)\s+(?:the word\s+)?("?)(\w+)\1/i);
-  return match ? match[2] : text;
-}
+// Check for OAuth callback on page load
+handleOAuthCallback();
+updateSignInButton();

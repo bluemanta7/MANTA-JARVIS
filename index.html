@@ -1,39 +1,92 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MANTA-JARVIS</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Hamburger menu toggle -->
   <div class="hamburger" id="hamburger">☰</div>
 
+  <!-- Sidebar with chat interface -->
   <div class="sidebar" id="sidebar">
     <div class="resizer" id="resizer"></div>
 
     <div class="chat-header">
-      <h2>MANTA-JARVIS Chat</h2>
+      <h2>🤖 MANTA-JARVIS</h2>
+      <p class="subtitle">Voice Assistant</p>
     </div>
 
+    <!-- Google Sign-In Button (moved inside sidebar) -->
+    <div class="auth-section">
+      <button id="signin" class="signin-btn">Sign in with Google</button>
+    </div>
+
+    <!-- Chat thread -->
     <div id="chatThread" class="chat-thread"></div>
 
+    <!-- Chat input bar -->
     <div class="chat-input" id="chatInputBar">
-      <input type="text" id="userInput" placeholder="Type a message..." />
-      <button id="sendBtn">Send</button>
+      <input type="text" id="userInput" placeholder="Type a message or ask me anything..." />
+      <button id="sendBtn" class="send-btn">Send</button>
     </div>
   </div>
 
+  <!-- Main content area -->
   <div class="container">
-    <div class="voice-circle" id="voiceButton">🎙️</div>
-    <p id="transcript">Say something...</p>
+    <div class="main-content">
+      <h1 class="app-title">MANTA-JARVIS</h1>
+      <p class="app-description">Click the microphone to speak or type in the chat</p>
+      
+      <!-- Voice button -->
+      <div class="voice-circle" id="voiceButton">🎙️</div>
+      
+      <!-- Transcript display -->
+      <div class="transcript-container">
+        <p id="transcript">Say something...</p>
+      </div>
+
+      <!-- Quick commands help -->
+      <div class="help-section">
+        <h3>What I can do:</h3>
+        <ul>
+          <li><strong>Philosophical Dialogue:</strong> "Tell me about the trolley problem" or "What is consciousness?"</li>
+          <li><strong>Ethical Reasoning:</strong> "Is it ever okay to lie?" or "How should I think about harm?"</li>
+          <li><strong>Calendar Events:</strong> "Create a meeting called Team Sync tomorrow at 3pm"</li>
+          <li><strong>Wikipedia Lookups:</strong> "What is quantum computing?" or "Define artificial intelligence"</li>
+          <li><strong>Creative Content:</strong> "Tell me a poem"</li>
+        </ul>
+      </div>
+    </div>
   </div>
 
-  <!-- ✅ Move script to the very end -->
+  <!-- Voice configuration -->
   <script src="voiceConfig.js"></script>
+  
+  <!-- Main application script -->
   <script src="app.js"></script>
+
+  <!-- Additional initialization (optional) -->
   <script>
-    window.voiceConfig.useServerTTS = true;
-    window.voiceConfig.serverUrl = 'http://127.0.0.1:5000/synthesize';
-    window.voiceConfig.serverToken = 'your-secret-token';
+    // Add welcome message when page loads
+    window.addEventListener('DOMContentLoaded', () => {
+      const chatThread = document.getElementById('chatThread');
+      if (chatThread) {
+        const welcomeMsg = document.createElement('div');
+        welcomeMsg.className = 'message ai welcome';
+        welcomeMsg.innerHTML = `
+          <strong>👋 Welcome to MANTA-JARVIS!</strong><br><br>
+          I can help you with:<br>
+          • Creating Google Calendar events<br>
+          • Looking up Wikipedia information<br>
+          • Answering questions<br><br>
+          Click the microphone or type to get started!
+        `;
+        chatThread.appendChild(welcomeMsg);
+      }
+    });
   </script>
 </body>
 </html>

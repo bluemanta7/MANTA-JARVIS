@@ -1,34 +1,29 @@
-// voiceConfig.js — basic voice/personality configuration for MANTA-JARVIS
-// This file exposes `window.voiceConfig` with simple TTS tuning options.
+/**
+ * MANTA-JARVIS Voice Configuration
+ * 
+ * Configure TTS (Text-to-Speech) settings here
+ */
 
 window.voiceConfig = {
-  // preferredVoice: a substring to match against available voice names
-  // Example: 'Samantha' or 'Google US English'
-  preferredVoice: '',
-
-  // voiceFilter: fallback filter if preferredVoice not found
-  voiceFilter: 'en',
-
-  // language tag
+  // Server TTS (Coqui) settings
+  useServerTTS: false,  // Set to true if you have Coqui TTS installed on the server
+  serverUrl: 'http://127.0.0.1:8080/synthesize',
+  serverToken: '',  // Optional: set if you configured TTS_TOKEN environment variable
+  
+  // Browser TTS fallback settings
   lang: 'en-US',
-
-  // basic speaking parameters
-  rate: 1.0,
-  pitch: 1.0,
-
-  // Personality placeholders (not functional in browser TTS yet).
-  // We provide fields so future integrations (neural voices or SSML) can use them.
-  personality: {
-    friendliness: 0.8, // 0..1
-    sarcasm: 0.0,      // 0..1
-    energy: 0.5        // 0..1
-  }
+  rate: 1.0,      // Speed: 0.1 to 10 (1.0 is normal)
+  pitch: 1.0,     // Pitch: 0 to 2 (1.0 is normal)
+  
+  // Voice selection (optional)
+  preferredVoice: 'Google US English',  // Preferred voice name
+  voiceFilter: 'en-US'  // Filter voices by language code
 };
 
-// Usage: edit these fields to tweak voice behavior.
-// For advanced neural TTS (external APIs), you'd replace speak() to send text+personality to the service.
-
-// Server TTS options (set to true to route speech via your local Coqui TTS server)
-window.voiceConfig.useServerTTS = false;
-window.voiceConfig.serverUrl = '/synthesize';
-window.voiceConfig.serverToken = '';
+// Log available voices (for debugging)
+if (typeof speechSynthesis !== 'undefined') {
+  speechSynthesis.onvoiceschanged = () => {
+    const voices = speechSynthesis.getVoices();
+    console.log('Available voices:', voices.map(v => v.name));
+  };
+}
