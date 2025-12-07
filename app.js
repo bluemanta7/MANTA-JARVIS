@@ -133,14 +133,14 @@ async function deleteEvent(username, eventId) {
 }
 
 async function getServerBaseURL() {
-  // Determine the backend URL based on environment
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return 'http://localhost:5000';
   } else {
-    // On deployed environment, use the same domain
-    return `${window.location.protocol}//${window.location.host}`;
+    // Always point to your deployed backend
+    return 'https://manta-jarvis.onrender.com';
   }
 }
+
 
 async function syncEventsToServer(username, events) {
   try {
@@ -250,13 +250,10 @@ function loginUser(username) {
     
     // Get dynamic base URL
     getServerBaseURL().then(baseURL => {
-      const calendarUrl = `${baseURL}/calendar/${username_b64}.ics`;
-      document.getElementById('calendarLink').value = calendarUrl;
-    }).catch(error => {
-      // Fallback to localhost
-      const calendarUrl = `http://localhost:5000/calendar/${username_b64}.ics`;
-      document.getElementById('calendarLink').value = calendarUrl;
-    });
+  const calendarUrl = `${baseURL}/calendar/${username_b64}.ics`;
+  document.getElementById('calendarLink').value = calendarUrl;
+});
+
   }
   
   addMessage(`👋 Welcome, ${username}! I'm Jarvis, here to help with your calendar.`, 'ai');
