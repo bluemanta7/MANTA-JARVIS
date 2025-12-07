@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: manta-jarvis-calendar
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python serve_ics.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: DEBUG
+        value: false
+      - key: PORT
+        value: 5000

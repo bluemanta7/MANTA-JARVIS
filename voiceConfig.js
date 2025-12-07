@@ -1,29 +1,49 @@
-/**
- * MANTA-JARVIS Voice Configuration
- * 
- * Configure TTS (Text-to-Speech) settings here
- */
+// ============================================================================
+// MANTA-JARVIS - Voice Configuration
+// ============================================================================
 
 window.voiceConfig = {
-  // Server TTS (Coqui) settings
-  useServerTTS: false,  // Set to true if you have Coqui TTS installed on the server
-  serverUrl: 'http://127.0.0.1:8080/synthesize',
-  serverToken: '',  // Optional: set if you configured TTS_TOKEN environment variable
-  
-  // Browser TTS fallback settings
+  // Browser TTS settings
   lang: 'en-US',
-  rate: 1.0,      // Speed: 0.1 to 10 (1.0 is normal)
-  pitch: 1.0,     // Pitch: 0 to 2 (1.0 is normal)
+  rate: 1.0,
+  pitch: 1.0,
   
-  // Voice selection (optional)
-  preferredVoice: 'Google US English',  // Preferred voice name
-  voiceFilter: 'en-US'  // Filter voices by language code
+  // Preferred voice (optional)
+  // Examples: 'Google US English', 'Microsoft David', 'Alex'
+  preferredVoice: null,
+  
+  // Voice filter (matches partial name)
+  voiceFilter: 'english',
+  
+  // Server TTS settings (if using Flask backend)
+  useServerTTS: false,
+  serverUrl: 'http://localhost:8080/synthesize',
+  serverToken: null, // Optional authentication token
+  
+  // Speech recognition settings
+  recognitionLang: 'en-US',
+  continuousRecognition: false,
+  interimResults: false
 };
 
-// Log available voices (for debugging)
-if (typeof speechSynthesis !== 'undefined') {
-  speechSynthesis.onvoiceschanged = () => {
+// Voice selection helper
+function listAvailableVoices() {
+  if ('speechSynthesis' in window) {
     const voices = speechSynthesis.getVoices();
-    console.log('Available voices:', voices.map(v => v.name));
+    console.log('Available voices:');
+    voices.forEach((voice, index) => {
+      console.log(`${index}: ${voice.name} (${voice.lang})`);
+    });
+  }
+}
+
+// Call this in the browser console to see available voices
+window.listAvailableVoices = listAvailableVoices;
+
+// Load voices when they become available
+if ('speechSynthesis' in window) {
+  speechSynthesis.onvoiceschanged = () => {
+    // Voices are now loaded
+    console.log('Voices loaded. Call listAvailableVoices() to see them.');
   };
 }

@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+env/
+venv/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Data files (optional - keep for production)
+# Uncomment to ignore user data during development:
+# data/users/*.json
+
+# Environment variables
+.env
+.env.local
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Logs
+*.log
+
+user_token.json
+credentials.json
+

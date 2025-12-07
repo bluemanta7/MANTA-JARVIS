@@ -1,429 +1,455 @@
 // ============================================================================
-// MANTA JARVIS - Voice Assistant with Google Calendar Integration
+// MANTA-JARVIS - Main Application Script
 // ============================================================================
 
-// Configuration
-const CONFIG = {
-  CLIENT_ID: '1031943830579-h57ffduintve8o0t4kt567klobu0ibeg.apps.googleusercontent.com',
-  REDIRECT_URI: 'http://localhost:8080/oauth2callback',
-  FLASK_BASE_URL: 'http://localhost:8080',
-  TTS_ENDPOINT: 'http://localhost:8080/synthesize'
+// ============================================================================
+// State Management
+// ============================================================================
+let currentUser = null;
+let isListening = false;
+let recognition = null;
+
+// ============================================================================
+// In-Memory Storage (Fallback since window.storage may not be available)
+// ============================================================================
+const memoryStorage = {
+  data: {},
+  
+  async set(key, value) {
+    this.data[key] = value;
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      console.warn('localStorage not available, using memory only');
+    }
+    return { key, value };
+  },
+  
+  async get(key) {
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        this.data[key] = stored;
+        return { value: stored };
+      }
+    } catch (e) {
+      console.warn('localStorage not available');
+    }
+    
+    if (this.data[key]) {
+      return { value: this.data[key] };
+    }
+    return null;
+  }
 };
 
+const storage = window.storage || memoryStorage;
+
 // ============================================================================
-// Authentication & State Management
+// Persistent Storage Functions
 // ============================================================================
+async function saveUserData(username, data) {
+  try {
+    await storage.set(`user:${username}`, JSON.stringify(data));
+    console.log('User data saved:', username);
+    return true;
+  } catch (error) {
+    console.error('Failed to save user data:', error);
+    return false;
+  }
+}
 
-let authState = {
-  isAuthenticated: false,
-  accessToken: null
-};
+async function loadUserData(username) {
+  try {
+    const result = await storage.get(`user:${username}`);
+    if (result && result.value) {
+      return JSON.parse(result.value);
+    }
+    return null;
+  } catch (error) {
+    console.error('Failed to load user data:', error);
+    return null;
+  }
+}
 
-// Handle OAuth callback (extract code from URL)
-function handleOAuthCallback() {
-  const urlParams = new URLSearchParams(window.location.search);
-  const code = urlParams.get('code');
-  const error = urlParams.get('error');
+async function saveEvent(username, event) {
+  const userData = await loadUserData(username) || { events: [] };
+  userData.events = userData.events || [];
+  event.id = event.id || Date.now().toString();
+  event.created = event.created || new Date().toISOString();
+  userData.events.push(event);
+  await saveUserData(username, userData);
+  console.log('Event saved:', event);
+  
+  await syncEventsToServer(username, userData.events);
+  
+  if (window.CalendarManager) {
+    window.CalendarManager.renderCalendar();
+    window.CalendarManager.loadEvents();
+  }
+  return event;
+}
 
-  if (error) {
-    console.error('OAuth error:', error);
-    addMessage(`Authentication failed: ${error}`, 'ai');
-    speak('Authentication failed. Please try signing in again.');
+async function updateEvent(username, eventId, updates) {
+  const userData = await loadUserData(username);
+  if (!userData || !userData.events) return false;
+  
+  const eventIndex = userData.events.findIndex(e => e.id === eventId);
+  if (eventIndex === -1) return false;
+  
+  userData.events[eventIndex] = { ...userData.events[eventIndex], ...updates };
+  await saveUserData(username, userData);
+  
+  await syncEventsToServer(username, userData.events);
+  
+  if (window.CalendarManager) {
+    window.CalendarManager.renderCalendar();
+    window.CalendarManager.loadEvents();
+  }
+  return true;
+}
+
+async function deleteEvent(username, eventId) {
+  const userData = await loadUserData(username);
+  if (!userData || !userData.events) return false;
+  
+  userData.events = userData.events.filter(e => e.id !== eventId);
+  await saveUserData(username, userData);
+  
+  await syncEventsToServer(username, userData.events);
+  
+  if (window.CalendarManager) {
+    window.CalendarManager.renderCalendar();
+    window.CalendarManager.loadEvents();
+  }
+  return true;
+}
+
+async function syncEventsToServer(username, events) {
+  try {
+    const username_b64 = btoa(username);
+    const response = await fetch('http://localhost:5000/api/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        username_b64: username_b64,
+        events: events
+      })
+    });
+    
+    if (response.ok) {
+      console.log('✅ Events synced to calendar server');
+    } else {
+      console.warn('⚠️ Failed to sync with calendar server (this is optional)');
+    }
+  } catch (error) {
+    console.warn('⚠️ Calendar server not available (this is optional):', error.message);
+  }
+}
+
+async function getUserEvents(username) {
+  const userData = await loadUserData(username);
+  return userData?.events || [];
+}
+
+window.getUserEvents = getUserEvents;
+window.saveEvent = saveEvent;
+window.updateEvent = updateEvent;
+window.deleteEvent = deleteEvent;
+window.getCurrentUser = () => currentUser;
+
+// ============================================================================
+// Authentication
+// ============================================================================
+document.getElementById('createAccountBtn').addEventListener('click', async () => {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+
+  if (!username || !password) {
+    alert('Please enter both username and password');
     return;
   }
 
-  if (code) {
-    // Clean up URL
-    window.history.replaceState({}, document.title, window.location.pathname);
-    
-    // Show success message
-    addMessage('Google authentication successful! You can now create calendar events.', 'ai');
-    speak('Authentication successful. You can now create calendar events using voice commands.');
-    
-    authState.isAuthenticated = true;
-    updateSignInButton();
-  }
-}
-
-// Update sign-in button appearance
-function updateSignInButton() {
-  const signInBtn = document.getElementById('signin');
-  if (signInBtn) {
-    if (authState.isAuthenticated) {
-      signInBtn.textContent = 'Signed In ✓';
-      signInBtn.style.backgroundColor = '#34A853';
-      signInBtn.disabled = true;
-    } else {
-      signInBtn.textContent = 'Sign in with Google';
-      signInBtn.style.backgroundColor = '#4285F4';
-      signInBtn.disabled = false;
+  try {
+    const existing = await loadUserData(username);
+    if (existing) {
+      alert('Username already exists. Please login instead.');
+      return;
     }
-  }
-}
 
-// Trigger Google OAuth flow
-document.getElementById('signin').addEventListener('click', () => {
-  const params = new URLSearchParams({
-    client_id: CONFIG.CLIENT_ID,
-    redirect_uri: CONFIG.REDIRECT_URI,
-    response_type: 'code',
-    scope: 'https://www.googleapis.com/auth/calendar.events',
-    access_type: 'offline',
-    prompt: 'consent'
-  });
-  window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+    await saveUserData(username, {
+      username,
+      password: btoa(password),
+      created: new Date().toISOString(),
+      events: []
+    });
+
+    loginUser(username);
+  } catch (error) {
+    alert('Failed to create account: ' + error.message);
+  }
 });
 
-// ============================================================================
-// DOM Elements
-// ============================================================================
+document.getElementById('loginBtn').addEventListener('click', async () => {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
 
-const resizer = document.getElementById('resizer');
-const voiceButton = document.getElementById('voiceButton');
-const transcript = document.getElementById('transcript');
-const hamburger = document.getElementById('hamburger');
-const sidebar = document.getElementById('sidebar');
-const chatThread = document.getElementById('chatThread');
-const userInput = document.getElementById('userInput');
-const sendBtn = document.getElementById('sendBtn');
-
-// Safety checks
-if (!chatThread) console.warn('chatThread element not found');
-if (!userInput || !sendBtn) console.warn('userInput or sendBtn not found');
-
-// ============================================================================
-// In-Memory Cache (replaces localStorage)
-// ============================================================================
-
-const memoryCache = new Map();
-const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
-
-function cacheSet(key, value) {
-  memoryCache.set(key, { ts: Date.now(), v: value });
-}
-
-function cacheGet(key) {
-  const cached = memoryCache.get(key);
-  if (!cached) return null;
-  if (Date.now() - cached.ts > CACHE_TTL_MS) {
-    memoryCache.delete(key);
-    return null;
+  if (!username || !password) {
+    alert('Please enter both username and password');
+    return;
   }
-  return cached.v;
+
+  try {
+    const userData = await loadUserData(username);
+    if (!userData || userData.password !== btoa(password)) {
+      alert('Invalid username or password');
+      return;
+    }
+
+    loginUser(username);
+  } catch (error) {
+    alert('Login failed: ' + error.message);
+  }
+});
+
+function loginUser(username) {
+  currentUser = username;
+  
+  document.getElementById('authSection').classList.add('hidden');
+  document.getElementById('userInfoSection').classList.add('visible');
+  document.getElementById('logoutBtn').classList.add('visible');
+  
+  document.getElementById('userDisplay').textContent = `👤 ${username}`;
+  
+  const calendarLinkSection = document.getElementById('calendarLinkSection');
+  if (calendarLinkSection) {
+    calendarLinkSection.style.display = 'block';
+    const username_b64 = btoa(username);
+    const calendarUrl = `http://localhost:5000/calendar/${username_b64}.ics`;
+    document.getElementById('calendarLink').value = calendarUrl;
+  }
+  
+  addMessage(`Welcome, ${username}! I'm ready to help you manage your calendar.`, 'ai');
+  
+  if (window.CalendarManager) {
+    window.CalendarManager.renderCalendar();
+    window.CalendarManager.loadEvents();
+  }
 }
 
-// ============================================================================
-// Disambiguation State
-// ============================================================================
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  currentUser = null;
+  document.getElementById('authSection').classList.remove('hidden');
+  document.getElementById('userInfoSection').classList.remove('visible');
+  document.getElementById('logoutBtn').classList.remove('visible');
+  
+  const calendarLinkSection = document.getElementById('calendarLinkSection');
+  if (calendarLinkSection) {
+    calendarLinkSection.style.display = 'none';
+  }
+  
+  document.getElementById('username').value = '';
+  document.getElementById('password').value = '';
+  document.getElementById('chatThread').innerHTML = '';
+  document.getElementById('eventList').innerHTML = '';
+  addWelcomeMessage();
+});
 
-let lastDisambiguationHits = null;
-let lastDisambiguationTerm = null;
+document.getElementById('copyLinkBtn').addEventListener('click', () => {
+  const linkInput = document.getElementById('calendarLink');
+  linkInput.select();
+  document.execCommand('copy');
+  addMessage('📋 Calendar link copied!', 'ai');
+  speak('Calendar link copied');
+});
 
 // ============================================================================
 // UI Controls
 // ============================================================================
-
-// Sidebar toggle
-hamburger.onclick = () => {
-  const isOpen = sidebar.classList.contains('open');
-  sidebar.classList.toggle('open');
-  sidebar.style.width = isOpen ? '300px' : sidebar.style.width;
-  voiceButton.style.marginLeft = isOpen ? '350px' : voiceButton.style.marginLeft;
-};
-
-// Sidebar resizer
-let isResizing = false;
-
-resizer.addEventListener('mousedown', () => {
-  isResizing = true;
-  document.body.style.cursor = 'ew-resize';
+document.getElementById('hamburger').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.toggle('open');
 });
 
-document.addEventListener('mousemove', (e) => {
-  if (!isResizing) return;
-  let newWidth = e.clientX;
-  newWidth = Math.max(250, Math.min(600, newWidth));
-  sidebar.style.width = `${newWidth}px`;
-  voiceButton.style.marginLeft = `${newWidth + 50}px`;
-});
-
-document.addEventListener('mouseup', () => {
-  isResizing = false;
-  document.body.style.cursor = 'default';
+document.getElementById('calendarToggle').addEventListener('click', () => {
+  document.getElementById('calendarSidebar').classList.toggle('open');
 });
 
 // ============================================================================
-// Speech Recognition Setup
+// Speech Recognition
 // ============================================================================
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.lang = 'en-US';
 
-const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-recognition.lang = 'en-US';
-recognition.continuous = false;
+  recognition.onstart = () => {
+    isListening = true;
+    document.getElementById('voiceButton').classList.add('listening');
+    document.getElementById('transcript').textContent = 'Listening...';
+  };
 
-let isListening = false;
-let restartDelayMs = 250;
-let restartAttempts = 0;
-const RESTART_MAX_DELAY = 5000;
-const RESTART_MAX_ATTEMPTS = 6;
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    document.getElementById('transcript').textContent = `You said: "${transcript}"`;
+    document.getElementById('sidebar').classList.add('open');
+    addMessage(transcript, 'user');
+    handleInput(transcript);
+  };
 
-function startListening() {
-  if (isListening) return;
-  isListening = true;
-  voiceButton.classList.add('listening');
-  try {
-    recognition.start();
-  } catch (e) {
-    console.warn('recognition.start failed', e);
-  }
-}
-
-function stopListening() {
-  if (!isListening) return;
-  isListening = false;
-  try {
-    recognition.stop();
-  } catch (e) {
-    console.warn('recognition.stop failed', e);
-  }
-  voiceButton.classList.remove('listening');
-}
-
-function scheduleRestart() {
-  if (!isListening) return;
-  restartAttempts++;
-  restartDelayMs = Math.min(RESTART_MAX_DELAY, 250 * Math.pow(2, Math.max(0, restartAttempts - 1)));
-  
-  if (restartAttempts > RESTART_MAX_ATTEMPTS) {
+  recognition.onend = () => {
     isListening = false;
-    voiceButton.classList.remove('listening');
-    const msg = 'Microphone repeatedly failed. Please check browser permissions and click the mic to try again.';
-    addMessage(msg, 'ai');
-    speak(msg);
+    document.getElementById('voiceButton').classList.remove('listening');
+  };
+
+  recognition.onerror = (event) => {
+    console.error('Speech recognition error:', event.error);
+    document.getElementById('transcript').textContent = 'Error: ' + event.error;
+  };
+}
+
+document.getElementById('voiceButton').addEventListener('click', () => {
+  if (!currentUser) {
+    addMessage('Please create an account or login first!', 'ai');
+    document.getElementById('sidebar').classList.add('open');
     return;
   }
 
-  setTimeout(() => {
-    if (!isListening) return;
-    try {
+  if (recognition) {
+    if (isListening) {
+      recognition.stop();
+    } else {
       recognition.start();
-    } catch (e) {
-      console.warn('recognition.restart failed', e);
     }
-  }, restartDelayMs);
-}
-
-voiceButton.onclick = () => {
-  if (isListening) {
-    stopListening();
-    speak('Stopped listening');
-  } else {
-    startListening();
-    speak('Listening');
   }
-};
-
-recognition.onresult = (event) => {
-  const text = event.results[0][0].transcript;
-  transcript.textContent = `You said: "${text}"`;
-  sidebar.classList.add('open');
-  addMessage(text, 'user');
-  handleInput(text);
-};
-
-recognition.onstart = () => {
-  restartAttempts = 0;
-  restartDelayMs = 250;
-};
-
-recognition.onend = () => {
-  if (isListening) {
-    scheduleRestart();
-  } else {
-    voiceButton.classList.remove('listening');
-  }
-};
-
-recognition.onerror = (err) => {
-  console.warn('recognition error', err);
-  const code = err && (err.error || err.message || err.type || '').toString().toLowerCase();
-  if (code.includes('notallowed') || code.includes('permission') || code.includes('denied')) {
-    isListening = false;
-    voiceButton.classList.remove('listening');
-    const msg = 'Microphone permission denied. Please allow microphone access and try again.';
-    addMessage(msg, 'ai');
-    speak(msg);
-  }
-};
+});
 
 // ============================================================================
-// Speech Synthesis (TTS)
+// Chat Functions
 // ============================================================================
+document.getElementById('sendBtn').addEventListener('click', sendMessage);
+document.getElementById('userInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') sendMessage();
+});
 
-function _selectPreferredVoice() {
-  try {
-    const cfg = window.voiceConfig || {};
-    const voices = speechSynthesis.getVoices() || [];
-    let selected = null;
-    
-    if (cfg.preferredVoice) {
-      selected = voices.find(v => v.name && v.name.toLowerCase().includes(cfg.preferredVoice.toLowerCase()));
-    }
-    if (!selected && cfg.voiceFilter) {
-      selected = voices.find(v => v.name && v.name.toLowerCase().includes(cfg.voiceFilter.toLowerCase()));
-    }
-    if (!selected && voices.length) selected = voices[0];
-    
-    window._preferredVoice = selected || null;
-  } catch (e) {
-    console.warn('selectPreferredVoice failed', e);
-  }
-}
-
-speechSynthesis.onvoiceschanged = () => {
-  _selectPreferredVoice();
-};
-
-function speak(text) {
-  const cfg = window.voiceConfig || {};
+function sendMessage() {
+  const input = document.getElementById('userInput');
+  const message = input.value.trim();
   
-  // Server TTS (Coqui)
-  if (cfg.useServerTTS && cfg.serverUrl) {
-    const busy = document.createElement('div');
-    busy.className = 'message ai';
-    busy.textContent = '🔊 Synthesizing audio...';
-    chatThread.appendChild(busy);
-    chatThread.scrollTop = chatThread.scrollHeight;
-
-    const payload = { text };
-    const headers = { 'Content-Type': 'application/json' };
-    if (cfg.serverToken) headers['X-TTS-TOKEN'] = cfg.serverToken;
-
-    fetch(cfg.serverUrl, { method: 'POST', headers, body: JSON.stringify(payload) })
-      .then(r => {
-        if (!r.ok) throw new Error('TTS server error');
-        return r.blob();
-      })
-      .then(blob => {
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audio.onended = () => { URL.revokeObjectURL(url); busy.remove(); };
-        audio.onerror = () => { URL.revokeObjectURL(url); busy.remove(); console.error('Audio playback error'); };
-        audio.play();
-      })
-      .catch(err => {
-        console.error('Server TTS failed', err);
-        busy.textContent = 'Server TTS failed, falling back to browser TTS.';
-        setTimeout(() => { try { busy.remove(); } catch(e){} }, 2000);
-        
-        // Fallback to browser TTS
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = cfg.lang || 'en-US';
-        utterance.rate = cfg.rate || 1;
-        utterance.pitch = cfg.pitch || 1;
-        if (!window._preferredVoice) _selectPreferredVoice();
-        if (window._preferredVoice) utterance.voice = window._preferredVoice;
-        speechSynthesis.speak(utterance);
-      });
+  if (!message) return;
+  
+  if (!currentUser) {
+    addMessage('Please create an account or login first!', 'ai');
     return;
   }
 
-  // Browser TTS fallback
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = cfg.lang || 'en-US';
-  utterance.rate = cfg.rate || 1;
-  utterance.pitch = cfg.pitch || 1;
-  if (!window._preferredVoice) _selectPreferredVoice();
-  if (window._preferredVoice) utterance.voice = window._preferredVoice;
-  speechSynthesis.speak(utterance);
+  addMessage(message, 'user');
+  input.value = '';
+  handleInput(message);
 }
-
-// ============================================================================
-// Chat UI
-// ============================================================================
 
 function addMessage(text, sender) {
-  const msg = document.createElement('div');
-  msg.className = `message ${sender}`;
-  msg.textContent = text;
-  chatThread.appendChild(msg);
+  const chatThread = document.getElementById('chatThread');
+  const message = document.createElement('div');
+  message.className = `message ${sender}`;
+  message.innerHTML = text;
+  chatThread.appendChild(message);
   chatThread.scrollTop = chatThread.scrollHeight;
 }
 
-// ============================================================================
-// Google Calendar Event Creation
-// ============================================================================
+function addWelcomeMessage() {
+  const welcomeMsg = `<strong>👋 Welcome to MANTA-JARVIS!</strong><br><br>
+    Create an account to start managing your calendar with AI assistance!`;
+  addMessage(welcomeMsg, 'ai welcome');
+}
 
-async function createCalendarEvent(eventData) {
-  if (!authState.isAuthenticated) {
-    const msg = 'Please sign in with Google first to create calendar events.';
-    addMessage(msg, 'ai');
-    speak(msg);
-    return null;
-  }
-
-  try {
-    addMessage('📅 Creating calendar event...', 'ai');
-    
-    const response = await fetch(`${CONFIG.FLASK_BASE_URL}/create_event`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(eventData)
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-    
-    const successMsg = `✓ Event "${eventData.summary}" created successfully!`;
-    addMessage(successMsg, 'ai');
-    speak(`Event ${eventData.summary} has been added to your calendar.`);
-    
-    return data;
-  } catch (err) {
-    console.error('Failed to create event:', err);
-    const errorMsg = `Failed to create event: ${err.message}`;
-    addMessage(errorMsg, 'ai');
-    speak('Sorry, I could not create the calendar event. Please try again.');
-    return null;
+function speak(text) {
+  if ('speechSynthesis' in window) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    speechSynthesis.speak(utterance);
   }
 }
 
-// Parse natural language into event data
-function parseEventCommand(text) {
+// ============================================================================
+// FIXED Date Parsing - Handles days of week, dates, etc.
+// ============================================================================
+function parseDate(text) {
   const lower = text.toLowerCase();
-  
-  // Check if it's an event creation command
-  if (!/\b(create|schedule|add|make|set up|book)\b.*\b(event|meeting|appointment|calendar)\b/i.test(text)) {
-    return null;
-  }
-
-  // Extract event title/summary
-  let summary = 'New Event';
-  const titleMatch = text.match(/(?:create|schedule|add|make|set up|book)\s+(?:a|an)?\s*(?:event|meeting|appointment)?\s+(?:called|named|titled)?\s*["']?([^"']+?)["']?\s+(?:on|at|for)/i);
-  if (titleMatch) {
-    summary = titleMatch[1].trim();
-  } else {
-    const simpleMatch = text.match(/(?:create|schedule|add)\s+["']?([^"']+?)["']?\s+(?:event|meeting)/i);
-    if (simpleMatch) summary = simpleMatch[1].trim();
-  }
-
-  // Extract date/time (simplified - you'd want more robust parsing)
   const now = new Date();
-  let startTime = new Date(now.getTime() + 60 * 60 * 1000); // Default: 1 hour from now
-  let endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // Default: 1 hour duration
-
-  // Look for "tomorrow"
+  
   if (/\btomorrow\b/i.test(text)) {
-    startTime = new Date(now);
-    startTime.setDate(startTime.getDate() + 1);
-    startTime.setHours(10, 0, 0, 0); // 10 AM
-    endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
+    const date = new Date(now);
+    date.setDate(date.getDate() + 1);
+    return date;
   }
+  
+  if (/\btoday\b/i.test(text)) {
+    return new Date(now);
+  }
+  
+  // Days of the week
+  const daysOfWeek = {
+    'sunday': 0, 'sun': 0,
+    'monday': 1, 'mon': 1,
+    'tuesday': 2, 'tue': 2, 'tues': 2,
+    'wednesday': 3, 'wed': 3,
+    'thursday': 4, 'thu': 4, 'thur': 4, 'thurs': 4,
+    'friday': 5, 'fri': 5,
+    'saturday': 6, 'sat': 6
+  };
+  
+  for (const [day, dayNum] of Object.entries(daysOfWeek)) {
+    const regex = new RegExp(`\\b${day}\\b`, 'i');
+    if (regex.test(text)) {
+      const targetDate = new Date(now);
+      const currentDay = targetDate.getDay();
+      let daysToAdd = dayNum - currentDay;
+      
+      if (daysToAdd <= 0) {
+        daysToAdd += 7;
+      }
+      
+      targetDate.setDate(targetDate.getDate() + daysToAdd);
+      return targetDate;
+    }
+  }
+  
+  // FIXED: Specific date like "the 12th", "the 15th"
+  const dateMatch = text.match(/\b(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)\b/i);
+  if (dateMatch) {
+    const day = parseInt(dateMatch[1]);
+    if (day >= 1 && day <= 31) {
+      const targetDate = new Date(now.getFullYear(), now.getMonth(), day);
+      
+      // If the date has passed this month, schedule for next month
+      if (targetDate < now) {
+        targetDate.setMonth(targetDate.getMonth() + 1);
+      }
+      
+      console.log(`📅 Parsed date: day ${day} → ${targetDate.toLocaleDateString()}`);
+      return targetDate;
+    }
+  }
+  
+  if (lower.includes('next week')) {
+    const date = new Date(now);
+    date.setDate(date.getDate() + 7);
+    return date;
+  }
+  
+  if (lower.includes('next month')) {
+    const date = new Date(now);
+    date.setMonth(date.getMonth() + 1);
+    return date;
+  }
+  
+  return null;
+}
 
-  // Look for specific times like "at 3pm" or "at 15:00"
+function parseTime(text) {
   const timeMatch = text.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
   if (timeMatch) {
     let hours = parseInt(timeMatch[1]);
@@ -433,256 +459,293 @@ function parseEventCommand(text) {
     if (meridiem === 'pm' && hours < 12) hours += 12;
     if (meridiem === 'am' && hours === 12) hours = 0;
     
-    startTime.setHours(hours, minutes, 0, 0);
-    endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
+    return { hours, minutes, hasTime: true };
+  }
+  
+  return { hours: null, minutes: null, hasTime: false };
+}
+
+// ============================================================================
+// Event Parsing
+// ============================================================================
+function parseEventCommand(text) {
+  const lower = text.toLowerCase();
+  
+  const eventTriggers = ['create', 'schedule', 'add', 'make', 'set up', 'book', 'plan'];
+  const eventWords = ['event', 'meeting', 'appointment', 'reminder'];
+  
+  const hasTrigger = eventTriggers.some(trigger => lower.includes(trigger));
+  const hasEventWord = eventWords.some(word => lower.includes(word));
+  
+  if (!hasTrigger && !hasEventWord) {
+    return null;
   }
 
-  // Format as ISO 8601 with timezone
-  const formatDateTime = (date) => {
-    const offset = -date.getTimezoneOffset();
-    const sign = offset >= 0 ? '+' : '-';
-    const pad = (num) => String(Math.abs(num)).padStart(2, '0');
+  let summary = null;
+  
+  const calledMatch = text.match(/(?:called|named|titled)\s+["']?([^"']+?)["']?(?:\s+(?:tomorrow|today|at|on|for|monday|tuesday|wednesday|thursday|friday|saturday|sunday|the)|$)/i);
+  if (calledMatch) {
+    summary = calledMatch[1].trim();
+  }
+  
+  if (!summary) {
+    const quoteMatch = text.match(/["']([^"']+)["']/);
+    if (quoteMatch) {
+      summary = quoteMatch[1].trim();
+    }
+  }
+  
+  if (!summary) {
+    const dateTimeKeywords = ['tomorrow', 'today', 'next week', 'at ', 'on ', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'the '];
     
-    return date.getFullYear() + '-' +
-           pad(date.getMonth() + 1) + '-' +
-           pad(date.getDate()) + 'T' +
-           pad(date.getHours()) + ':' +
-           pad(date.getMinutes()) + ':' +
-           pad(date.getSeconds()) +
-           sign + pad(Math.floor(Math.abs(offset) / 60)) + ':' + pad(Math.abs(offset) % 60);
-  };
+    let titleStart = -1;
+    for (const trigger of [...eventTriggers, ...eventWords]) {
+      const idx = lower.indexOf(trigger);
+      if (idx !== -1) {
+        titleStart = idx + trigger.length;
+        break;
+      }
+    }
+    
+    if (titleStart !== -1) {
+      let titleEnd = text.length;
+      for (const keyword of dateTimeKeywords) {
+        const idx = lower.indexOf(keyword, titleStart);
+        if (idx !== -1 && idx > titleStart && idx < titleEnd) {
+          titleEnd = idx;
+        }
+      }
+      
+      let extracted = text.substring(titleStart, titleEnd).trim();
+      
+      const fillers = ['please', 'can you', 'could you', 'a ', 'an ', 'the ', 'for me'];
+      fillers.forEach(filler => {
+        extracted = extracted.replace(new RegExp(`\\b${filler}\\b`, 'gi'), ' ');
+      });
+      
+      extracted = extracted.replace(/\s+/g, ' ').trim();
+      
+      if (extracted && extracted.length > 2) {
+        summary = extracted;
+      }
+    }
+  }
+  
+  if (!summary || summary.length < 2) {
+    console.log('❌ Event rejected: No valid title found');
+    return null;
+  }
+
+  let startTime = parseDate(text);
+  if (!startTime) {
+    startTime = new Date();
+    startTime.setHours(startTime.getHours() + 1, 0, 0, 0);
+  }
+  
+  const timeInfo = parseTime(text);
+  if (timeInfo.hasTime) {
+    startTime.setHours(timeInfo.hours, timeInfo.minutes, 0, 0);
+  } else {
+    const now = new Date();
+    if (startTime.toDateString() === now.toDateString()) {
+      startTime.setHours(now.getHours() + 1, 0, 0, 0);
+    } else {
+      startTime.setHours(10, 0, 0, 0);
+    }
+  }
+
+  const endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
+
+  console.log('✅ Event parsed:', { 
+    summary, 
+    start: startTime.toLocaleString(), 
+    end: endTime.toLocaleString()
+  });
 
   return {
     summary: summary,
-    start_time: formatDateTime(startTime),
-    end_time: formatDateTime(endTime)
+    start: startTime.toISOString(),
+    end: endTime.toISOString()
   };
+}
+
+async function createEvent(eventData) {
+  if (!currentUser) {
+    addMessage('Please login first to create events', 'ai');
+    speak('Please login first');
+    return;
+  }
+
+  try {
+    const saved = await saveEvent(currentUser, eventData);
+    console.log('Event created and saved:', saved);
+    
+    const startDate = new Date(eventData.start);
+    const msg = `✅ Event "${eventData.summary}" created for ${startDate.toLocaleDateString()} at ${startDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+    addMessage(msg, 'ai');
+    speak(`Event ${eventData.summary} has been added to your calendar.`);
+    
+    document.getElementById('calendarSidebar').classList.add('open');
+  } catch (error) {
+    console.error('Failed to create event:', error);
+    addMessage('Failed to create event: ' + error.message, 'ai');
+    speak('Failed to create event');
+  }
 }
 
 // ============================================================================
 // Wikipedia Integration
 // ============================================================================
-
 async function fetchWikipediaSummary(title) {
   const normalized = title.replace(/\s+/g, '_');
   const safeTitle = encodeURIComponent(normalized);
-  const cacheKey = `title:${normalized.toLowerCase()}`;
-
-  const cached = cacheGet(cacheKey);
-  if (cached) return cached;
-
   const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${safeTitle}`;
   const res = await fetch(url);
   
-  if (!res.ok) {
-    const err = new Error('not-found');
-    err.status = res.status;
-    throw err;
-  }
-
-  const data = await res.json();
-
-  if (data.type && data.type.toLowerCase().includes('disambiguation')) {
-    throw new Error('disambiguation');
-  }
-
-  if (!data.extract) {
-    throw new Error('no-extract');
-  }
-
-  const out = { title: data.title, summary: data.extract };
-  cacheSet(cacheKey, out);
-  return out;
-}
-
-async function searchWikipediaAndFetch(term) {
-  const qs = encodeURIComponent(term);
-  const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${qs}&format=json&origin=*`;
-  const res = await fetch(searchUrl);
-  
-  if (!res.ok) throw new Error('search-failed');
+  if (!res.ok) throw new Error('not-found');
   
   const data = await res.json();
-  const hits = data.query && data.query.search;
+  if (!data.extract) throw new Error('no-extract');
   
-  if (!hits || hits.length === 0) throw new Error('no-results');
-  
-  const topHits = hits.slice(0, 5).map(h => ({ title: h.title, snippet: h.snippet }));
-
-  if (topHits.length === 1) {
-    const cacheKey = `search:${term.toLowerCase()}`;
-    const cached = cacheGet(cacheKey);
-    if (cached) return cached;
-
-    const fetched = await fetchWikipediaSummary(topHits[0].title);
-    cacheSet(cacheKey, fetched);
-    return fetched;
-  }
-
-  return { disambiguation: true, term, hits: topHits };
-}
-
-function presentDisambiguation(term, hits) {
-  const wrapper = document.createElement('div');
-  wrapper.className = 'message ai disamb';
-
-  const header = document.createElement('div');
-  header.textContent = `I found multiple meanings for "${term}". Which one did you mean?`;
-  header.style.marginBottom = '8px';
-  wrapper.appendChild(header);
-
-  const list = document.createElement('ol');
-  list.style.paddingLeft = '20px';
-  
-  hits.forEach((h, i) => {
-    const li = document.createElement('li');
-    li.style.cursor = 'pointer';
-    li.style.marginBottom = '6px';
-    li.textContent = h.title;
-    li.dataset.title = h.title;
-    li.dataset.index = i + 1;
-    
-    li.onclick = () => {
-      addMessage(h.title, 'user');
-      fetchWikipediaSummary(h.title)
-        .then(res => {
-          const out = `${res.title}: ${res.summary}`;
-          addMessage(out, 'ai');
-          speak(res.summary);
-        })
-        .catch(err => {
-          console.error('Failed to fetch selected title', err);
-          addMessage("Failed to fetch that article.", 'ai');
-          speak("Failed to fetch that article.");
-        });
-    };
-    
-    list.appendChild(li);
-  });
-
-  wrapper.appendChild(list);
-
-  const note = document.createElement('div');
-  note.textContent = 'You can reply with the number (e.g. "2") or say/type the exact title.';
-  note.style.fontSize = '0.9em';
-  note.style.marginTop = '6px';
-  wrapper.appendChild(note);
-
-  chatThread.appendChild(wrapper);
-  chatThread.scrollTop = chatThread.scrollHeight;
-
-  lastDisambiguationHits = hits;
-  lastDisambiguationTerm = term;
-}
-
-function parseSelectionFromText(text) {
-  if (!lastDisambiguationHits || !text) return null;
-  const t = text.trim().toLowerCase();
-
-  if (/^cancel$|^never mind$|^nevermind$/i.test(t)) {
-    lastDisambiguationHits = null;
-    lastDisambiguationTerm = null;
-    return 'CANCELLED';
-  }
-
-  const numMatch = t.match(/^(\d+)$/);
-  if (numMatch) {
-    const idx = parseInt(numMatch[1], 10) - 1;
-    if (idx >= 0 && idx < lastDisambiguationHits.length) return lastDisambiguationHits[idx].title;
-    return null;
-  }
-
-  const ordinals = { 'first':1, 'second':2, 'third':3, 'fourth':4, 'fifth':5 };
-  const ordMatch = t.match(/\b(first|second|third|fourth|fifth)\b/);
-  if (ordMatch) {
-    const idx = (ordinals[ordMatch[1]] || 1) - 1;
-    if (idx >= 0 && idx < lastDisambiguationHits.length) return lastDisambiguationHits[idx].title;
-  }
-
-  for (const h of lastDisambiguationHits) {
-    if (h.title.toLowerCase() === t) return h.title;
-    if (h.title.toLowerCase().includes(t) || t.includes(h.title.toLowerCase())) return h.title;
-  }
-
-  return null;
-}
-
-function parseDefinitionQuery(text) {
-  if (!text || typeof text !== 'string') return null;
-  const t = text.trim();
-
-  let m = t.match(/["'"](.+?)["'"]/);
-  if (m && m[1]) return sanitizeTerm(m[1]);
-
-  const patterns = [
-    /(?:define|definition of|meaning of|what is|what's|whats|explain)\s+(?:the\s+word\s+)?(.+?)[\?\.!]?$/i,
-    /(?:what does)\s+(.+?)\s+mean\??$/i,
-    /(?:tell me about|who is|who was|give me information about)\s+(.+?)[\?\.!]?$/i
-  ];
-
-  for (const p of patterns) {
-    m = t.match(p);
-    if (m && m[1]) return sanitizeTerm(m[1]);
-  }
-
-  const words = t.replace(/[\?\.!]/g, '').split(/\s+/).filter(Boolean);
-  if (words.length <= 3) return sanitizeTerm(t);
-
-  const lastThree = words.slice(-3).join(' ');
-  return sanitizeTerm(lastThree);
-}
-
-function sanitizeTerm(s) {
-  let term = s.trim();
-  term = term.replace(/^[:;"'\s]+|[\s:;"'\.,!?]+$/g, '');
-  if (term.length > 100) term = term.slice(0, 100);
-  return term;
+  return { title: data.title, summary: data.extract };
 }
 
 // ============================================================================
-// Input Handler (Main Logic)
+// FIXED Event Management - Edit/Delete via typing
 // ============================================================================
-
-async function handleInput(text) {
-  const lower = (text || '').toLowerCase();
-
-  // Handle disambiguation selection
-  if (lastDisambiguationHits) {
-    const selection = parseSelectionFromText(text);
-    
-    if (selection === 'CANCELLED') {
-      addMessage('Okay, cancelled selection.', 'ai');
-      lastDisambiguationHits = null;
-      lastDisambiguationTerm = null;
-      return;
-    }
-
-    if (selection) {
-      addMessage(selection, 'user');
-      lastDisambiguationHits = null;
-      
-      try {
-        const res = await fetchWikipediaSummary(selection);
-        const out = `${res.title}: ${res.summary}`;
-        addMessage(out, 'ai');
-        speak(res.summary);
-      } catch (err) {
-        console.error('Failed to fetch selected title', err);
-        addMessage("Failed to fetch that article.", 'ai');
-        speak("Failed to fetch that article.");
-      }
-      return;
-    }
-  }
-
-  // Check for calendar event creation
-  const eventData = parseEventCommand(text);
-  if (eventData) {
-    await createCalendarEvent(eventData);
+async function handleDeleteEvent(text) {
+  const events = await getUserEvents(currentUser);
+  if (events.length === 0) {
+    addMessage('You have no events to delete.', 'ai');
+    speak('You have no events to delete');
     return;
   }
 
-  // Handle poem request
+  let message = '🗑️ Which event would you like to delete? Reply with the number:<br><br>';
+  events.forEach((event, index) => {
+    const startDate = new Date(event.start);
+    message += `${index + 1}. <strong>${event.summary}</strong> - ${startDate.toLocaleDateString()} at ${startDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}<br>`;
+  });
+  
+  addMessage(message, 'ai');
+  speak('Which event would you like to delete? Reply with the number.');
+  
+  window.pendingAction = { type: 'delete', events };
+}
+
+async function handleEditEvent(text) {
+  const events = await getUserEvents(currentUser);
+  if (events.length === 0) {
+    addMessage('You have no events to edit.', 'ai');
+    speak('You have no events to edit');
+    return;
+  }
+
+  let message = '✏️ Which event would you like to edit? Reply with the number:<br><br>';
+  events.forEach((event, index) => {
+    const startDate = new Date(event.start);
+    message += `${index + 1}. <strong>${event.summary}</strong> - ${startDate.toLocaleDateString()} at ${startDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}<br>`;
+  });
+  
+  addMessage(message, 'ai');
+  speak('Which event would you like to edit? Reply with the number.');
+  
+  window.pendingAction = { type: 'edit', events };
+}
+
+async function handlePendingAction(text) {
+  if (!window.pendingAction) return false;
+
+  const action = window.pendingAction;
+  
+  if (text.toLowerCase().includes('cancel') || text.toLowerCase().includes('nevermind')) {
+    window.pendingAction = null;
+    addMessage('Action cancelled.', 'ai');
+    speak('Cancelled');
+    return true;
+  }
+  
+  const num = parseInt(text.trim());
+  
+  if (isNaN(num) || num < 1 || num > action.events.length) {
+    addMessage('❌ Invalid number. Please try again or say "cancel".', 'ai');
+    return true;
+  }
+
+  const event = action.events[num - 1];
+  
+  if (action.type === 'delete') {
+    await deleteEvent(currentUser, event.id);
+    addMessage(`✅ Event "${event.summary}" has been deleted.`, 'ai');
+    speak(`Event ${event.summary} deleted`);
+    window.pendingAction = null;
+    return true;
+  }
+  
+  if (action.type === 'edit') {
+    addMessage(`✏️ What would you like to rename "${event.summary}" to?`, 'ai');
+    speak('What would you like to rename it to?');
+    window.pendingAction = { type: 'rename', event: event };
+    return true;
+  }
+  
+  if (action.type === 'rename') {
+    const newTitle = text.trim();
+    if (newTitle && newTitle.length > 0) {
+      await updateEvent(currentUser, action.event.id, { summary: newTitle });
+      addMessage(`✅ Event renamed to "${newTitle}".`, 'ai');
+      speak(`Event renamed to ${newTitle}`);
+    }
+    window.pendingAction = null;
+    return true;
+  }
+  
+  return false;
+}
+
+// ============================================================================
+// Input Handler
+// ============================================================================
+async function handleInput(text) {
+  const lower = text.toLowerCase();
+
+  // Check pending actions first
+  if (window.pendingAction) {
+    const handled = await handlePendingAction(text);
+    if (handled) return;
+  }
+
+  // Delete command
+  if ((lower.includes('delete') || lower.includes('remove')) && 
+      (lower.includes('event') || lower.includes('meeting') || lower.includes('appointment'))) {
+    await handleDeleteEvent(text);
+    return;
+  }
+
+  // Edit command
+  if ((lower.includes('edit') || lower.includes('change') || lower.includes('rename')) && 
+      (lower.includes('event') || lower.includes('meeting') || lower.includes('appointment'))) {
+    await handleEditEvent(text);
+    return;
+  }
+
+  // Create event
+  const eventData = parseEventCommand(text);
+  if (eventData) {
+    await createEvent(eventData);
+    return;
+  }
+
+  const eventAttempt = ['create', 'schedule', 'add', 'make'].some(word => lower.includes(word)) &&
+                       ['event', 'meeting', 'appointment'].some(word => lower.includes(word));
+  
+  if (eventAttempt) {
+    addMessage('⚠️ I couldn\'t create that event. Please include:\n• Event name (e.g., "workout")\n• Time (optional): "at 3pm"\n• Date (optional): "tomorrow", "Wednesday", "the 12th"\n\nExample: "create event workout Wednesday at 6am"', 'ai');
+    speak('I need more information to create the event. Please include the event name and optionally the time and date.');
+    return;
+  }
+
+  // Poem
   if (lower.includes('poem')) {
     const response = `In circuits deep and wires bright,\nI dream in code through day and night.\nYou speak, I listen, thoughts arise,\nTogether we explore the skies.`;
     addMessage(response, 'ai');
@@ -690,80 +753,59 @@ async function handleInput(text) {
     return;
   }
 
-  // Handle definition queries
-  if (/\bdefine\b|\bdefinition of\b|\bwhat is\b|\bwhat's\b|\bmeaning of\b|\bwhat does\b/i.test(text)) {
-    const term = parseDefinitionQuery(text);
+  // Wikipedia
+  if (/\b(what is|who is|tell me about|define)\b/i.test(text)) {
+    const term = text.replace(/\b(what is|who is|tell me about|define)\b/gi, '').trim().replace(/\?/g, '');
     
-    if (!term) {
-      const msg = "I couldn't determine the term to define. Could you rephrase?";
-      addMessage(msg, 'ai');
-      speak(msg);
+    if (term) {
+      addMessage(`Searching Wikipedia for "${term}"...`, 'ai');
+      
+      try {
+        const result = await fetchWikipediaSummary(term);
+        const msg = `${result.title}: ${result.summary}`;
+        addMessage(msg, 'ai');
+        speak(result.summary.substring(0, 200));
+      } catch (error) {
+        addMessage("I couldn't find information about that.", 'ai');
+        speak("I couldn't find information about that.");
+      }
       return;
     }
+  }
 
-    addMessage(`Searching Wikipedia for "${term}"...`, 'ai');
-
-    try {
-      let result;
-      try {
-        result = await fetchWikipediaSummary(term);
-      } catch (err) {
-        result = await searchWikipediaAndFetch(term);
-      }
-
-      if (result && result.disambiguation && Array.isArray(result.hits)) {
-        presentDisambiguation(result.term, result.hits);
-        return;
-      }
-
-      const summary = result.summary;
-      const title = result.title || term;
-      const out = `${title}: ${summary}`;
-      addMessage(out, 'ai');
-      speak(summary);
-    } catch (err) {
-      console.error('Wikipedia lookup failed', err);
-      const fallback = "I couldn't find a good Wikipedia summary for that term. Try a shorter or different query.";
-      addMessage(fallback, 'ai');
-      speak(fallback);
-    }
+  // Philosophy
+  if (lower.includes('trolley problem')) {
+    const response = "The trolley problem is a thought experiment in ethics. It asks whether you would pull a lever to divert a runaway trolley onto a track with one person instead of five. This explores the tension between utilitarian ethics and deontological ethics.";
+    addMessage(response, 'ai');
+    speak(response);
     return;
   }
 
-  // Default response
-  const response = `You said: "${text}". I'm thinking about that...`;
+  if (lower.includes('consciousness')) {
+    const response = "Consciousness is the state of being aware of and able to think about one's own existence, thoughts, and surroundings. It remains one of the greatest mysteries in philosophy and neuroscience.";
+    addMessage(response, 'ai');
+    speak(response);
+    return;
+  }
+
+  // Default
+  const response = `You said: "${text}". I'm processing that with my AI reasoning capabilities.`;
   addMessage(response, 'ai');
-  speak(response);
-}
-
-// ============================================================================
-// Text Input Handlers
-// ============================================================================
-
-sendBtn.onclick = () => {
-  const text = userInput.value.trim();
-  if (text === "") return;
-
-  sidebar.classList.add('open');
-  addMessage(text, 'user');
-  userInput.value = "";
-
-  handleInput(text);
-};
-
-if (userInput) {
-  userInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      sendBtn.click();
-    }
-  });
+  speak("I'm thinking about that");
 }
 
 // ============================================================================
 // Initialization
 // ============================================================================
-
-// Check for OAuth callback on page load
-handleOAuthCallback();
-updateSignInButton();
+window.addEventListener('DOMContentLoaded', () => {
+  addWelcomeMessage();
+  
+  const calendarLinkSection = document.getElementById('calendarLinkSection');
+  if (calendarLinkSection) {
+    calendarLinkSection.style.display = 'none';
+  }
+  
+  if (window.CalendarManager) {
+    window.CalendarManager.init();
+  }
+});

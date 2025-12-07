@@ -35,6 +35,16 @@
       <!-- User Info Section -->
       <div class="user-info-section" id="userInfoSection">
         <div class="user-email" id="userDisplay"></div>
+        <div class="calendar-link-container">
+          <p>📅 Your Calendar Feed:</p>
+          <div class="calendar-link-input">
+            <input type="text" id="calendarLink" readonly>
+            <button id="copyLinkBtn">Copy</button>
+          </div>
+          <p style="font-size: 11px; color: #888; margin-top: 5px;">
+            Add this link to Google Calendar or any calendar app
+          </p>
+        </div>
       </div>
 
       <!-- Chat Thread -->
@@ -62,7 +72,7 @@
         <div class="help-section">
           <h3>What I can do:</h3>
           <ul>
-            <li><strong>📅 Calendar:</strong> "Create event tomorrow workout at 3pm"</li>
+            <li><strong>📅 Calendar:</strong> "Create meeting Team Sync tomorrow at 3pm"</li>
             <li><strong>📚 Wikipedia:</strong> "What is quantum computing?"</li>
             <li><strong>💭 Philosophy:</strong> "Tell me about the trolley problem"</li>
             <li><strong>✨ Creative:</strong> "Tell me a poem"</li>
@@ -75,19 +85,6 @@
     <div class="calendar-sidebar" id="calendarSidebar">
       <div class="calendar-header">
         <h2>📅 My Calendar</h2>
-        
-        <!-- Calendar Link Section (moved here) -->
-        <div class="calendar-link-section" id="calendarLinkSection">
-          <p style="font-size: 12px; color: #aaa; margin: 10px 0 5px 0;">Your Calendar Feed:</p>
-          <div class="calendar-link-input">
-            <input type="text" id="calendarLink" readonly>
-            <button id="copyLinkBtn">Copy</button>
-          </div>
-          <p style="font-size: 11px; color: #888; margin-top: 5px;">
-            Add this to Google Calendar or any calendar app
-          </p>
-        </div>
-        
         <div class="calendar-nav">
           <button id="prevMonth">◀</button>
           <span class="calendar-month" id="currentMonth"></span>
@@ -113,9 +110,3 @@
   <script src="app.js"></script>
 </body>
 </html>
-
-<!-- 
-
-Ok event created, it shows the buttons to edit and delete, but I personally want to be able to type edit and delete any event we choose. So if we say delete event, it should always ask for clarification. Also after creating some events on the website calendar, when I clicked copy link and added it to my google calendar, nothing appeared on google calendar. Also I typed create another event called test for Wednesday the 12th and it said ✅ Event "test" created for 11/11/2025 at 12:00 AM. Which means it cannot process days and dates for some reason. We must implement each day and tell it to add event to nearest day unless stated otherwise, and when using numbers signifying the day of month like the 12th meaning the 12th of this month.
- 
--->

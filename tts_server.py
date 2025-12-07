@@ -1,3 +1,7 @@
+from flask import Response
+from ics import Calendar, Event
+import json
+
 #!/usr/bin/env python3
 """
 MANTA-JARVIS Flask Backend
@@ -18,7 +22,7 @@ from google.auth.transport.requests import Request
 
 # Coqui TTS
 try:
-    from TTS.api import TTS
+    from TTS.api import TTS  # type: ignore
     COQUI_AVAILABLE = True
 except Exception as e:
     print(f'⚠️  Coqui TTS import failed: {e}')
@@ -61,29 +65,14 @@ def get_tts():
 
 
 @app.route('/synthesize', methods=['POST'])
-def synthesize():
-    """
-    Synthesize speech from text using Coqui TTS
-    
-    Request body:
-    {
-        "text": "Text to synthesize",
-        "speaker": "speaker_name" (optional),
-        "rate": 1.0 (optional)
-    }
-    
-    Returns: WAV audio file
-    """
-    # Optional token authentication
-    if SERVER_TOKEN:
-        token = request.headers.get('X-TTS-TOKEN', '')
-        if token != SERVER_TOKEN:
-            return jsonify({'error': 'Unauthorized'}), 401
-
-    # Parse request
+def synthesize_audio():
     data = request.get_json(force=True)
-    text = data.get('text', '').strip()
-    
+    subject = data.get('subject_request')  # Optional: used for calendar logic
+    text = data.get('text')  # This is the actual speech input
+
+    if not subject:
+        return jsonify({'error': 'Missing subject_request'}), 400
+
     if not text:
         return jsonify({'error': 'No text provided'}), 400
 
@@ -93,22 +82,22 @@ def synthesize():
 
     try:
         tts = get_tts()
-        
+
         # Generate audio file
         out_path = 'temp_out.wav'
         print(f'🎤 Synthesizing: "{text[:50]}..."')
         tts.tts_to_file(text=text, file_path=out_path)
-        
+
         # Load into memory and return
         bio = BytesIO()
         with open(out_path, 'rb') as f:
             bio.write(f.read())
         bio.seek(0)
-        
+
         # Clean up temp file
         if os.path.exists(out_path):
             os.remove(out_path)
-        
+
         print('✓ Audio synthesized successfully')
         return send_file(
             bio,
@@ -116,10 +105,11 @@ def synthesize():
             as_attachment=False,
             download_name='speech.wav'
         )
-    
+
     except Exception as e:
         print(f'❌ TTS synthesis failed: {e}')
         return jsonify({'error': str(e)}), 500
+
 
 
 # ============================================================================
@@ -128,162 +118,123 @@ def synthesize():
 
 @app.route('/oauth2callback')
 def oauth2callback():
-    """
-    Handle OAuth callback from Google
-    Exchanges authorization code for access token
-    """
     try:
-        # Verify credentials file exists
-        if not os.path.exists(CREDENTIALS_FILE):
-            return jsonify({
-                'error': f'Missing {CREDENTIALS_FILE}. Please download from Google Cloud Console.'
-            }), 500
-
-        # Create OAuth flow
         flow = Flow.from_client_secrets_file(
             CREDENTIALS_FILE,
             scopes=SCOPES,
             redirect_uri='http://localhost:8080/oauth2callback'
         )
-        
-        # Exchange authorization code for credentials
         flow.fetch_token(authorization_response=request.url)
+
         creds = flow.credentials
 
-        # Save credentials to file
-        with open(TOKEN_FILE, 'w') as token_file:
-            token_file.write(creds.to_json())
+        # Build calendar service to extract user email
+        service = build('calendar', 'v3', credentials=creds)
+        profile = service.calendarList().get(calendarId='primary').execute()
+        user_email = profile.get('id')
+
+        # Save token to file
+        token_path = f'tokens/{user_email}.json'
+        with open(token_path, 'w') as f:
+            f.write(creds.to_json())
 
         print('✓ User authenticated successfully')
         
-        # Return a simple HTML page that closes the window or redirects
-        return '''
+        # Return HTML that sets localStorage and redirects
+        return f"""
         <html>
             <head><title>Authentication Successful</title></head>
             <body style="font-family: Arial; text-align: center; padding: 50px;">
                 <h1>✓ Authentication Successful!</h1>
                 <p>You can now close this window and return to MANTA-JARVIS.</p>
                 <script>
-                    // Automatically redirect back to main app
-                    setTimeout(() => {
+                    localStorage.setItem('jarvis_user_email', '{user_email}');
+                    setTimeout(() => {{
                         window.location.href = 'http://localhost:8080';
-                    }, 2000);
+                    }}, 2000);
                 </script>
             </body>
         </html>
-        '''
+        """
     
     except Exception as e:
         print(f'❌ OAuth callback failed: {e}')
         return jsonify({'error': str(e)}), 500
 
 
-def get_calendar_credentials():
-    """Load and refresh Google Calendar credentials"""
-    if not os.path.exists(TOKEN_FILE):
-        raise FileNotFoundError(
-            'Not authenticated. Please sign in with Google first.'
-        )
-    
-    creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-    
-    # Refresh if expired
-    if creds.expired and creds.refresh_token:
-        print('🔄 Refreshing expired credentials...')
-        creds.refresh(Request())
-        
-        # Save refreshed credentials
-        with open(TOKEN_FILE, 'w') as token_file:
-            token_file.write(creds.to_json())
-    
-    return creds
+def get_calendar_credentials(email):
+    token_path = f'tokens/{email}.json'
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+        return creds
+    return None
 
 
-# ============================================================================
-# Google Calendar Event Creation
-# ============================================================================
-
-@app.route('/create_event', methods=['POST'])
-def handle_create_event():
+@app.route('/update_event', methods=['POST'])
+def update_event():
     """
-    Create a Google Calendar event
+    Update an existing calendar event.
     
     Request body:
     {
-        "summary": "Event title",
-        "start_time": "2025-10-15T14:00:00-04:00",
-        "end_time": "2025-10-15T15:00:00-04:00",
-        "description": "Optional description",
-        "location": "Optional location"
+        "event_id": "abc123def456",
+        "summary": "Updated title",
+        "start_time": "2025-10-15T16:00:00-04:00",
+        "end_time": "2025-10-15T17:00:00-04:00",
+        "description": "Updated description",
+        "location": "Updated location"
     }
     
-    Returns: Event details or error
+    Returns: Updated event details or error
     """
-    # Parse request
     data = request.get_json(force=True)
+    event_id = data.get('event_id')
     summary = data.get('summary')
     start_time = data.get('start_time')
     end_time = data.get('end_time')
-    description = data.get('description', '')
-    location = data.get('location', '')
+    description = data.get('description')
+    location = data.get('location')
 
-    # Validate required fields
-    if not summary or not start_time or not end_time:
-        return jsonify({
-            'error': 'Missing required fields: summary, start_time, end_time'
-        }), 400
+    if not event_id:
+        return jsonify({'error': 'Missing required field: event_id'}), 400
 
     try:
-        # Get authenticated credentials
-        creds = get_calendar_credentials()
-        
-        # Build Calendar API service
+        creds = get_calendar_credentials(data.get('email'))
+        if not creds:
+            return jsonify({'error': 'Not authenticated'}), 401
+            
         service = build('calendar', 'v3', credentials=creds)
-        
-        # Create event object
-        event = {
-            'summary': summary,
-            'start': {
-                'dateTime': start_time,
-                'timeZone': 'America/New_York'
-            },
-            'end': {
-                'dateTime': end_time,
-                'timeZone': 'America/New_York'
-            }
-        }
-        
-        # Add optional fields
-        if description:
-            event['description'] = description
-        if location:
-            event['location'] = location
-        
-        # Insert event into calendar
-        print(f'📅 Creating event: {summary}')
-        created_event = service.events().insert(
-            calendarId='primary',
-            body=event
-        ).execute()
-        
-        print(f'✓ Event created: {created_event.get("htmlLink")}')
-        
-        return jsonify({
-            'status': 'Event created successfully',
-            'event_id': created_event.get('id'),
-            'event_link': created_event.get('htmlLink'),
-            'summary': summary,
-            'start': start_time,
-            'end': end_time
-        }), 200
-    
-    except FileNotFoundError as e:
-        return jsonify({'error': str(e)}), 401
-    
-    except Exception as e:
-        print(f'❌ Failed to create event: {e}')
-        return jsonify({'error': str(e)}), 500
 
+        # Fetch the existing event
+        event = service.events().get(calendarId='primary', eventId=event_id).execute()
+
+        # Update fields if provided
+        if summary:
+            event['summary'] = summary
+        if start_time:
+            event['start']['dateTime'] = start_time
+        if end_time:
+            event['end']['dateTime'] = end_time
+        if description is not None:
+            event['description'] = description
+        if location is not None:
+            event['location'] = location
+
+        updated_event = service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
+
+        print(f'✏️ Event updated: {updated_event.get("htmlLink")}')
+        return jsonify({
+            'status': 'Event updated successfully',
+            'event_id': updated_event.get('id'),
+            'event_link': updated_event.get('htmlLink'),
+            'summary': updated_event.get('summary'),
+            'start': updated_event['start']['dateTime'],
+            'end': updated_event['end']['dateTime']
+        }), 200
+
+    except Exception as e:
+        print(f'❌ Failed to update event: {e}')
+        return jsonify({'error': str(e)}), 500
 
 # ============================================================================
 # Health Check & Info Routes
@@ -298,12 +249,6 @@ def index():
             <title>MANTA-JARVIS Backend</title>
             <style>
                 body { font-family: Arial; max-width: 800px; margin: 50px auto; padding: 20px; }
-                h1 { color: #4285F4; }
-                .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
-                .ok { background: #d4edda; color: #155724; }
-                .warning { background: #fff3cd; color: #856404; }
-                code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
-            </style>
         </head>
         <body>
             <h1>🤖 MANTA-JARVIS Backend</h1>
@@ -367,10 +312,98 @@ def not_found(e):
 def internal_error(e):
     return jsonify({'error': 'Internal server error'}), 500
 
+# Existing imports and routes
+from flask import Flask, request, jsonify, Response
+from ics import Calendar, Event  # ✅ Add this if you're using ics.py
+
+app = Flask(__name__)
+
+# ... your existing routes like /, /signin, /oauth2callback, etc.
+
+# ✅ Add this new route BELOW your other routes
+@app.route('/calendar/<user_email>.ics')
+def calendar_feed(user_email):
+    events = get_user_events(user_email)  # You’ll define this function
+    cal = Calendar()
+
+    for e in events:
+        event = Event()
+        event.name = e['title']
+        event.begin = e['start']
+        event.end = e['end']
+        event.description = e.get('description', '')
+        event.location = e.get('location', '')
+        cal.events.add(event)
+
+    return Response(str(cal), mimetype='text/calendar')
+
 
 # ============================================================================
 # Main Entry Point
 # ============================================================================
+
+if __name__ == '__main__':
+    print('=' * 60)
+    print('🤖 MANTA-JARVIS Backend Server')
+    print('=' * 60)
+    print(f'TTS Available: {COQUI_AVAILABLE}')
+    print(f'Credentials File: {os.path.exists(CREDENTIALS_FILE)}')
+    print(f'User Token: {os.path.exists(TOKEN_FILE)}')
+    print('=' * 60)
+    print('Starting server on http://127.0.0.1:8080')
+    print('Press Ctrl+C to stop')
+    print('=' * 60)
+    
+    app.run(
+        host='127.0.0.1',
+        port=8080,
+        debug=True
+    )
+@app.route('/whoami', methods=['GET'])
+def whoami():
+    email = request.args.get('email')
+    creds = get_calendar_credentials(email)
+    if creds:
+        return jsonify({'email': email}), 200
+    return jsonify({'error': 'No credentials found'}), 404
+
+def get_user_events(user_email):
+    """Retrieve user events from storage"""
+    try:
+        with open('user_events.json', 'r') as f:
+            data = json.load(f)
+        return data.get(user_email, [])
+    except FileNotFoundError:
+        return []
+
+
+@app.route('/whoami', methods=['GET'])
+def whoami():
+    """Get current authenticated user email"""
+    email = request.args.get('email')
+    creds = get_calendar_credentials(email)
+    if creds:
+        return jsonify({'email': email}), 200
+    return jsonify({'error': 'No credentials found'}), 404
+
+
+@app.route('/calendar/<user_email>.ics')
+def calendar_feed(user_email):
+    """Generate iCalendar feed for user events"""
+    events = get_user_events(user_email)
+    cal = Calendar()
+
+    for e in events:
+        event = Event()
+        event.name = e['title']
+        event.begin = e['start']
+        event.end = e['end']
+        event.description = e.get('description', '')
+        event.location = e.get('location', '')
+        cal.events.add(event)
+
+    return Response(str(cal), mimetype='text/calendar')
+
 
 if __name__ == '__main__':
     print('=' * 60)

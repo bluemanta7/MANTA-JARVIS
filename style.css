@@ -11,7 +11,7 @@
 body, html {
   height: 100%;
   margin: 0;
-  background-color: #121212;
+  background: linear-gradient(135deg, #0a1929 0%, #1a4d6d 50%, #0d3b5c 100%);
   color: white;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   overflow-x: hidden;
@@ -27,7 +27,7 @@ body, html {
   left: 20px;
   width: 50px;
   height: 50px;
-  background-color: #2e2e2e;
+  background-color: #1a5f7a;
   border-radius: 10px;
   display: flex;
   align-items: center;
@@ -37,13 +37,13 @@ body, html {
   z-index: 1000;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
   transition: all 0.3s ease;
-  color: white;
+  color: #00ffff;
 }
 
 .hamburger:hover {
   transform: scale(1.1);
-  background-color: #3e3e3e;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.7);
+  background-color: #2a8fab;
+  box-shadow: 0 6px 20px rgba(0, 255, 255, 0.3);
 }
 
 /* ============================================================================
@@ -58,10 +58,10 @@ body, html {
   max-width: 600px;
   min-width: 250px;
   height: 100vh;
-  background-color: #1e1e1e;
+  background: linear-gradient(180deg, #0d3b5c 0%, #1a5f7a 100%);
   color: white;
   box-shadow: 2px 0 15px rgba(0, 0, 0, 0.5);
-  transition: left 0.3s ease, width 0.3s ease;
+  transition: left 0.3s ease;
   z-index: 999;
   display: flex;
   flex-direction: column;
@@ -91,9 +91,9 @@ body, html {
 
 /* Chat header */
 .chat-header {
-  background-color: #2e2e2e;
+  background-color: #0a3d54;
   padding: 15px;
-  border-bottom: 1px solid #444;
+  border-bottom: 1px solid #1a7a9e;
   text-align: center;
   position: sticky;
   top: 0;
@@ -103,13 +103,13 @@ body, html {
 .chat-header h2 {
   margin: 0;
   font-size: 1.4em;
-  color: white;
+  color: #00ffff;
 }
 
 .subtitle {
   margin: 5px 0 0 0;
   font-size: 12px;
-  color: #aaa;
+  color: #7dd3fc;
   font-weight: normal;
 }
 
@@ -119,8 +119,8 @@ body, html {
 
 .auth-section {
   padding: 15px;
-  border-bottom: 1px solid #444;
-  background-color: #252525;
+  border-bottom: 1px solid #1a7a9e;
+  background-color: #0d5a7a;
 }
 
 .signin-btn {
@@ -216,7 +216,7 @@ body, html {
 }
 
 .message.user {
-  background-color: #4CAF50;
+  background-color: #00bcd4;
   color: white;
   align-self: flex-end;
   margin-left: auto;
@@ -224,7 +224,7 @@ body, html {
 }
 
 .message.ai {
-  background-color: #2e2e2e;
+  background-color: #0d5a7a;
   color: #e0e0e0;
   align-self: flex-start;
   text-align: left;
@@ -232,12 +232,12 @@ body, html {
 
 /* Welcome message */
 .message.welcome {
-  background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+  background: linear-gradient(135deg, #00bcd4 0%, #0097a7 100%);
   color: white;
   padding: 20px;
   border-radius: 12px;
   max-width: 100%;
-  box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+  box-shadow: 0 4px 15px rgba(0, 188, 212, 0.3);
 }
 
 .message.welcome strong {
@@ -249,8 +249,8 @@ body, html {
 /* Disambiguation messages */
 .message.disamb {
   max-width: 100%;
-  background-color: #3e3e3e;
-  border-left: 4px solid #ffc107;
+  background-color: #0d5a7a;
+  border-left: 4px solid #00ffff;
   color: #e0e0e0;
 }
 
@@ -262,7 +262,7 @@ body, html {
 .message.disamb li {
   padding: 10px;
   margin: 6px 0;
-  background-color: #2e2e2e;
+  background-color: #1a5f7a;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -270,7 +270,7 @@ body, html {
 }
 
 .message.disamb li:hover {
-  background-color: #4CAF50;
+  background-color: #00bcd4;
   color: white;
   transform: translateX(5px);
 }
@@ -291,8 +291,8 @@ body, html {
   flex: 1;
   padding: 12px;
   border-radius: 8px;
-  border: 2px solid #2e2e2e;
-  background-color: #2e2e2e;
+  border: 2px solid #1a5f7a;
+  background-color: #0d5a7a;
   color: white;
   font-size: 14px;
   outline: none;
@@ -300,17 +300,17 @@ body, html {
 }
 
 #userInput:focus {
-  border-color: #4CAF50;
+  border-color: #00ffff;
 }
 
 #userInput::placeholder {
-  color: #888;
+  color: #7dd3fc;
 }
 
 .send-btn,
 .chat-input button {
   padding: 12px 20px;
-  background-color: #4CAF50;
+  background-color: #00bcd4;
   color: white;
   border: none;
   border-radius: 8px;
@@ -322,9 +322,9 @@ body, html {
 
 .send-btn:hover,
 .chat-input button:hover {
-  background-color: #45a049;
+  background-color: #00acc1;
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.5);
+  box-shadow: 0 4px 12px rgba(0, 188, 212, 0.5);
 }
 
 .send-btn:active,
@@ -349,29 +349,52 @@ body, html {
   margin-left: 350px;
 }
 
+.main-content-wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  background: linear-gradient(135deg, #0a1929 0%, #1a4d6d 50%, #0d3b5c 100%);
+  transition: margin-left 0.3s ease, margin-right 0.3s ease;
+}
+
 .main-content {
   text-align: center;
   max-width: 700px;
   width: 100%;
-  background-color: rgba(30, 30, 30, 0.95);
+  background-color: rgba(10, 57, 84, 0.95);
   padding: 50px 40px;
   border-radius: 20px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 10px 40px rgba(0, 188, 212, 0.2);
   backdrop-filter: blur(10px);
+  border: 2px solid rgba(0, 188, 212, 0.3);
+}
+
+.voice-section {
+  text-align: center;
+  background-color: rgba(10, 57, 84, 0.95);
+  padding: 60px 40px;
+  border-radius: 20px;
+  box-shadow: 0 10px 40px rgba(0, 188, 212, 0.2);
+  max-width: 700px;
+  width: 100%;
+  backdrop-filter: blur(10px);
+  border: 2px solid rgba(0, 188, 212, 0.3);
 }
 
 .app-title {
   font-size: 48px;
   font-weight: 700;
   margin-bottom: 10px;
-  background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+  background: linear-gradient(135deg, #00bcd4 0%, #00acc1 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 .app-description {
-  color: #aaa;
+  color: #7dd3fc;
   font-size: 18px;
   margin-bottom: 40px;
 }
@@ -383,7 +406,7 @@ body, html {
 .voice-circle {
   width: 150px;
   height: 150px;
-  background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+  background: linear-gradient(135deg, #00bcd4 0%, #0097a7 100%);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -393,27 +416,27 @@ body, html {
   cursor: pointer;
   margin: 30px auto;
   transition: all 0.3s ease;
-  box-shadow: 0 10px 30px rgba(76, 175, 80, 0.4);
+  box-shadow: 0 10px 30px rgba(0, 188, 212, 0.4);
 }
 
 .voice-circle:hover {
   transform: scale(1.1);
-  box-shadow: 0 15px 40px rgba(76, 175, 80, 0.6);
+  box-shadow: 0 15px 40px rgba(0, 188, 212, 0.6);
 }
 
 .voice-circle.listening {
   animation: pulse 1.5s infinite;
-  background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%);
+  background: linear-gradient(135deg, #ff6b9d 0%, #00bcd4 100%);
 }
 
 @keyframes pulse {
   0%, 100% {
     transform: scale(1);
-    box-shadow: 0 10px 30px rgba(255, 107, 107, 0.4);
+    box-shadow: 0 10px 30px rgba(0, 188, 212, 0.4);
   }
   50% {
     transform: scale(1.15);
-    box-shadow: 0 15px 50px rgba(255, 107, 107, 0.8);
+    box-shadow: 0 15px 50px rgba(0, 188, 212, 0.8);
   }
 }
 
@@ -424,17 +447,17 @@ body, html {
 .transcript-container {
   margin: 30px 0;
   padding: 20px;
-  background-color: #2e2e2e;
+  background-color: #0d5a7a;
   border-radius: 12px;
   min-height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid #3e3e3e;
+  border: 2px solid #1a7a9e;
 }
 
 #transcript {
-  color: #aaa;
+  color: #7dd3fc;
   font-size: 16px;
   font-style: italic;
   margin: 0;
@@ -447,15 +470,15 @@ body, html {
 .help-section {
   margin-top: 40px;
   text-align: left;
-  background-color: #2e2e2e;
+  background-color: #0d5a7a;
   padding: 25px;
   border-radius: 12px;
-  border: 1px solid #3e3e3e;
+  border: 1px solid #1a7a9e;
 }
 
 .help-section h3 {
   margin: 0 0 15px 0;
-  color: #4CAF50;
+  color: #00ffff;
   font-size: 20px;
 }
 
@@ -466,9 +489,9 @@ body, html {
 
 .help-section li {
   padding: 10px 0;
-  color: #ccc;
+  color: #7dd3fc;
   font-size: 15px;
-  border-bottom: 1px solid #3e3e3e;
+  border-bottom: 1px solid #1a7a9e;
 }
 
 .help-section li:last-child {
@@ -552,4 +575,102 @@ body, html {
   to {
     opacity: 1;
   }
+}
+
+/* Add these updates to your existing style.css */
+
+/* User Info Section - Simplified (no calendar link here anymore) */
+.user-info-section {
+  padding: 15px 20px;
+  background-color: #252525;
+  border-bottom: 1px solid #444;
+  display: none;
+}
+
+.user-info-section.visible {
+  display: block;
+}
+
+.user-email {
+  font-size: 14px;
+  color: #4CAF50;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Auth section styling improvements */
+.auth-section input {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 10px;
+  background-color: #1a5f7a;
+  border: 2px solid #00ffff;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  transition: border-color 0.3s;
+}
+
+.auth-section input:focus {
+  outline: none;
+  border-color: #00ffff;
+}
+
+.auth-section button {
+  width: 100%;
+  padding: 12px;
+  background-color: #00bcd4;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.auth-section button:hover {
+  background-color: #00acc1;
+  transform: translateY(-2px);
+}
+
+.auth-section button.login-btn {
+  background-color: #2196F3;
+}
+
+.auth-section button.login-btn:hover {
+  background-color: #1976D2;
+}
+
+/* Logout button */
+.logout-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 12px 24px;
+  background-color: #f44336;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: 999;
+  display: none;
+  transition: all 0.3s;
+  font-weight: 600;
+}
+
+.logout-btn.visible {
+  display: block;
+}
+
+.logout-btn:hover {
+  background-color: #d32f2f;
+  transform: translateY(-2px);
+}
+
+/* Layout adjustments */
+.app-layout {
+  position: relative;
+  min-height: 100vh;
 }
