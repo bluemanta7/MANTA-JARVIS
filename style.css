@@ -674,3 +674,103 @@ body, html {
   position: relative;
   min-height: 100vh;
 }
+/* _________________________________________________________ */
+
+
+/* Add these updates to your existing style.css */
+
+/* User Info Section - Simplified (no calendar link here anymore) */
+.user-info-section {
+  padding: 15px 20px;
+  background-color: #252525;
+  border-bottom: 1px solid #444;
+  display: none;
+}
+
+.user-info-section.visible {
+  display: block;
+}
+
+.user-email {
+  font-size: 14px;
+  color: #4CAF50;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Auth section styling improvements */
+.auth-section input {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 10px;
+  background-color: #2e2e2e;
+  border: 2px solid #3e3e3e;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  transition: border-color 0.3s;
+}
+
+.auth-section input:focus {
+  outline: none;
+  border-color: #4CAF50;
+}
+
+.auth-section button {
+  width: 100%;
+  padding: 12px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.auth-section button:hover {
+  background-color: #45a049;
+  transform: translateY(-2px);
+}
+
+.auth-section button.login-btn {
+  background-color: #2196F3;
+}
+
+.auth-section button.login-btn:hover {
+  background-color: #1976D2;
+}
+
+/* Logout button */
+.logout-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 12px 24px;
+  background-color: #f44336;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: 999;
+  display: none;
+  transition: all 0.3s;
+  font-weight: 600;
+}
+
+.logout-btn.visible {
+  display: block;
+}
+
+.logout-btn:hover {
+  background-color: #d32f2f;
+  transform: translateY(-2px);
+}
+
+/* Layout adjustments */
+.app-layout {
+  position: relative;
+  min-height: 100vh;
+}

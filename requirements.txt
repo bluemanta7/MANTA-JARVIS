@@ -1,13 +1,4 @@
-flask==3.0.0
-flask-cors==4.0.0
+Flask==3.0.0
+Flask-CORS==4.0.0
 gunicorn==21.2.0
 Werkzeug==3.0.1
-
-# Google Calendar API
-google-auth==2.25.2
-google-auth-oauthlib==1.2.0
-google-auth-httplib2==0.2.0
-google-api-python-client==2.110.0
-
-# Coqui TTS (optional - comment out if not using)
-# TTS==0.22.0

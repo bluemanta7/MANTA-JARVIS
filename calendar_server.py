@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-MANTA-JARVIS Unified Calendar Server
-- Serves .ics calendar feeds for Google Calendar
-- Syncs events from frontend
-- Single port (5000) for everything
+MANTA-JARVIS Unified Calendar Server v2.0
+- Single Flask backend serving everything
+- Per-user .ics calendar feeds for Google Calendar subscription
+- Event sync from frontend
+- Conversational greeting layer
+- Production-ready with environment variable support
 """
 
 from flask import Flask, Response, request, jsonify
@@ -12,38 +14,56 @@ from datetime import datetime
 import json
 import os
 import base64
+import logging
+from urllib.parse import quote
 
+# ============================================================================
+# Configuration & Logging
+# ============================================================================
 app = Flask(__name__)
 CORS(app)
 
-# Directory to store user events
-DATA_DIR = 'calendar_data'
+# Environment variables
+PORT = int(os.environ.get("PORT", 5000))
+DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
+DATA_DIR = os.environ.get("DATA_DIR", "calendar_data")
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# Logging setup
+logging.basicConfig(
+    level=logging.INFO if not DEBUG else logging.DEBUG,
+    format='[%(levelname)s] %(asctime)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
 
 def get_user_file_path(username_b64):
     """Get the file path for a user's event data"""
     try:
-        # Sanitize filename
         safe_name = username_b64.replace('/', '_').replace('\\', '_')
         return os.path.join(DATA_DIR, f'{safe_name}.json')
-    except:
+    except Exception as e:
+        logger.error(f"Error getting user file path: {e}")
         return None
 
 def load_user_events(username_b64):
     """Load events for a user from JSON file"""
     path = get_user_file_path(username_b64)
     if not path or not os.path.exists(path):
-        print(f'📭 No events file found for: {username_b64}')
+        logger.debug(f"No events file found for: {username_b64}")
         return []
     
     try:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
             events = data.get('events', [])
-            print(f'📂 Loaded {len(events)} events for user')
+            logger.info(f"✅ Loaded {len(events)} events for user")
             return events
     except Exception as e:
-        print(f'❌ Error loading events: {e}')
+        logger.error(f"Error loading events: {e}")
         return []
 
 def save_user_events(username_b64, events):
@@ -62,23 +82,20 @@ def save_user_events(username_b64, events):
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         
-        print(f'💾 Saved {len(events)} events to {path}')
+        logger.info(f"💾 Saved {len(events)} events for user")
         return True
     except Exception as e:
-        print(f'❌ Error saving events: {e}')
+        logger.error(f"Error saving events: {e}")
         return False
 
 def format_datetime_ics(iso_str):
     """Convert ISO 8601 datetime to iCalendar format (YYYYMMDDTHHMMSSZ)"""
     try:
-        # Handle different ISO formats
         dt_str = iso_str.replace('Z', '+00:00')
         dt = datetime.fromisoformat(dt_str)
-        # Convert to UTC and format
         return dt.strftime('%Y%m%dT%H%M%SZ')
     except Exception as e:
-        print(f'⚠️ Date format error for "{iso_str}": {e}')
-        # Fallback to current time
+        logger.warning(f"Date format error for '{iso_str}': {e}")
         return datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
 
 def generate_ics_calendar(events):
@@ -105,10 +122,9 @@ def generate_ics_calendar(events):
             created = event.get('created', datetime.utcnow().isoformat())
             
             if not start:
-                print(f'⚠️ Skipping event without start time: {summary}')
+                logger.warning(f"Skipping event without start time: {summary}")
                 continue
             
-            # Format dates
             dtstart = format_datetime_ics(start)
             dtend = format_datetime_ics(end if end else start)
             dtstamp = format_datetime_ics(created)
@@ -130,17 +146,20 @@ def generate_ics_calendar(events):
                 lines.append(f'LOCATION:{location}')
             
             lines.append('END:VEVENT')
-            
-            print(f'✅ Added event to calendar: {summary} ({dtstart})')
+            logger.debug(f"✅ Added event to calendar: {summary}")
             
         except Exception as e:
-            print(f'❌ Error processing event: {e}')
+            logger.error(f"Error processing event: {e}")
             continue
     
     lines.append('END:VCALENDAR')
-    
-    # Use \r\n line endings as per iCalendar spec
     return '\r\n'.join(lines) + '\r\n'
+
+def get_base_url():
+    """Get the base URL for calendar feed URLs"""
+    if request.host_url:
+        return request.host_url.rstrip('/')
+    return f'http://localhost:{PORT}'
 
 # ============================================================================
 # API Endpoints
@@ -163,15 +182,15 @@ def sync_events():
         events = data.get('events', [])
         
         if not username_b64:
+            logger.warning("Sync request missing username_b64")
             return jsonify({'error': 'username_b64 required'}), 400
         
-        # Save events
         success = save_user_events(username_b64, events)
         
         if success:
-            calendar_url = f'http://localhost:5000/calendar/{username_b64}.ics'
-            print(f'✅ Synced {len(events)} events')
-            print(f'📅 Calendar URL: {calendar_url}')
+            base_url = get_base_url()
+            calendar_url = f'{base_url}/calendar/{username_b64}.ics'
+            logger.info(f"✅ Synced {len(events)} events for {username_b64}")
             
             return jsonify({
                 'status': 'success',
@@ -183,7 +202,7 @@ def sync_events():
             return jsonify({'error': 'Failed to save events'}), 500
             
     except Exception as e:
-        print(f'❌ Sync error: {e}')
+        logger.error(f"Sync error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/calendar/<username_b64>.ics', methods=['GET'])
@@ -194,31 +213,26 @@ def serve_calendar(username_b64):
     URL: /calendar/<base64_username>.ics
     """
     try:
-        print(f'📡 Calendar request for: {username_b64}')
+        logger.info(f"📡 Calendar feed requested for: {username_b64}")
         
-        # Load events
         events = load_user_events(username_b64)
         
         if not events:
-            print(f'⚠️ No events found, returning empty calendar')
-            # Return empty calendar
+            logger.debug(f"⚠️ No events found, returning empty calendar")
             empty_cal = generate_ics_calendar([])
             response = Response(empty_cal, mimetype='text/calendar')
-            response.headers['Content-Disposition'] = f'inline; filename="calendar.ics"'
+            response.headers['Content-Disposition'] = 'inline; filename="calendar.ics"'
             response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'
             return response
         
-        # Generate iCalendar content
         ics_content = generate_ics_calendar(events)
         
-        print(f'📅 Serving calendar with {len(events)} events')
-        print(f'📄 Calendar size: {len(ics_content)} bytes')
+        logger.info(f"📅 Serving calendar with {len(events)} events")
         
-        # Return with proper headers
         response = Response(ics_content, mimetype='text/calendar')
-        response.headers['Content-Disposition'] = f'inline; filename="manta-jarvis.ics"'
+        response.headers['Content-Disposition'] = 'inline; filename="manta-jarvis.ics"'
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
@@ -226,7 +240,33 @@ def serve_calendar(username_b64):
         return response
         
     except Exception as e:
-        print(f'❌ Calendar feed error: {e}')
+        logger.error(f"Calendar feed error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/get-calendar-url', methods=['POST'])
+def get_calendar_url():
+    """
+    Get the calendar URL for a user (called after login)
+    """
+    try:
+        data = request.get_json()
+        username_b64 = data.get('username_b64')
+        
+        if not username_b64:
+            return jsonify({'error': 'username_b64 required'}), 400
+        
+        base_url = get_base_url()
+        calendar_url = f'{base_url}/calendar/{username_b64}.ics'
+        
+        logger.info(f"Generated calendar URL for user")
+        
+        return jsonify({
+            'status': 'success',
+            'calendar_url': calendar_url
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error generating calendar URL: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/')
@@ -282,12 +322,13 @@ def index():
         </head>
         <body>
             <div class="container">
-                <h1>🗓️ MANTA-JARVIS Calendar Server</h1>
+                <h1>🗓️ MANTA-JARVIS Calendar Server v2.0</h1>
                 
                 <div class="status">
-                    ✅ Server is running on port 5000<br>
+                    ✅ Server is running on port {PORT}<br>
                     👥 Active users: {users}<br>
-                    📁 Data directory: {DATA_DIR}
+                    📁 Data directory: {os.path.abspath(DATA_DIR)}<br>
+                    🔧 Debug mode: {'ON' if DEBUG else 'OFF'}
                 </div>
                 
                 <h2>📡 Endpoints</h2>
@@ -298,25 +339,31 @@ def index():
                 </div>
                 
                 <div class="endpoint">
-                    <strong>GET</strong> /calendar/&lt;username&gt;.ics<br>
-                    <small>iCalendar feed for Google Calendar</small>
+                    <strong>POST</strong> /api/get-calendar-url<br>
+                    <small>Get unique calendar URL after login</small>
+                </div>
+                
+                <div class="endpoint">
+                    <strong>GET</strong> /calendar/&lt;username_b64&gt;.ics<br>
+                    <small>iCalendar feed for Google Calendar subscription</small>
                 </div>
                 
                 <h2>🚀 How to Use</h2>
                 <ol>
                     <li>Open <code>index.html</code> in your browser</li>
                     <li>Create an account and login</li>
+                    <li>Your unique calendar link appears automatically</li>
                     <li>Create events using voice or text commands</li>
-                    <li>Click the 📅 calendar icon</li>
-                    <li>Copy the calendar link</li>
-                    <li>Add to Google Calendar → "From URL"</li>
+                    <li>Copy the calendar link from the sidebar</li>
+                    <li>Add to Google Calendar → "Other calendars" → "From URL"</li>
+                    <li>Events sync in real-time!</li>
                 </ol>
                 
-                <h2>🔍 Debug</h2>
+                <h2>🔗 Deployment</h2>
                 <ul>
-                    <li>Check console logs for sync status</li>
-                    <li>Calendar files stored in: <code>{os.path.abspath(DATA_DIR)}</code></li>
-                    <li>Test calendar URL: <code>/calendar/&lt;your-username-b64&gt;.ics</code></li>
+                    <li><strong>Render.com:</strong> Start command: <code>gunicorn calendar_server:app</code></li>
+                    <li><strong>Environment variables:</strong> PORT, DEBUG, DATA_DIR</li>
+                    <li><strong>Requirements:</strong> Flask, Flask-CORS, gunicorn, Werkzeug</li>
                 </ul>
             </div>
         </body>
@@ -329,21 +376,26 @@ def health():
     users = len([f for f in os.listdir(DATA_DIR) if f.endswith('.json')]) if os.path.exists(DATA_DIR) else 0
     return jsonify({
         'status': 'ok',
-        'server': 'MANTA-JARVIS Calendar',
+        'server': 'MANTA-JARVIS Calendar Server v2.0',
         'users': users,
-        'port': 5000
+        'port': PORT
     })
 
+# ============================================================================
+# Application Startup
+# ============================================================================
+
 if __name__ == '__main__':
-    print('=' * 70)
-    print('🗓️  MANTA-JARVIS UNIFIED CALENDAR SERVER')
-    print('=' * 70)
-    print(f'📁 Data directory: {os.path.abspath(DATA_DIR)}')
-    print(f'🌐 Server URL: http://localhost:5000')
-    print(f'📅 Calendar feeds: http://localhost:5000/calendar/<username>.ics')
-    print('=' * 70)
-    print('✨ Server ready! Open index.html in your browser.')
-    print('Press Ctrl+C to stop')
-    print('=' * 70)
+    logger.info('=' * 70)
+    logger.info('🗓️  MANTA-JARVIS UNIFIED CALENDAR SERVER v2.0')
+    logger.info('=' * 70)
+    logger.info(f'📁 Data directory: {os.path.abspath(DATA_DIR)}')
+    logger.info(f'🌐 Server URL: http://localhost:{PORT}')
+    logger.info(f'📅 Calendar feeds: http://localhost:{PORT}/calendar/<username>.ics')
+    logger.info(f'🔧 Debug mode: {DEBUG}')
+    logger.info('=' * 70)
+    logger.info('✨ Server ready! Open index.html in your browser.')
+    logger.info('Press Ctrl+C to stop')
+    logger.info('=' * 70)
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=PORT, debug=DEBUG)

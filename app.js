@@ -17,6 +17,7 @@ const memoryStorage = {
   
   async set(key, value) {
     this.data[key] = value;
+    // Try to use localStorage as backup
     try {
       localStorage.setItem(key, value);
     } catch (e) {
@@ -26,6 +27,7 @@ const memoryStorage = {
   },
   
   async get(key) {
+    // Try localStorage first
     try {
       const stored = localStorage.getItem(key);
       if (stored) {
@@ -36,6 +38,7 @@ const memoryStorage = {
       console.warn('localStorage not available');
     }
     
+    // Fall back to memory
     if (this.data[key]) {
       return { value: this.data[key] };
     }
@@ -43,6 +46,7 @@ const memoryStorage = {
   }
 };
 
+// Use memory storage if window.storage isn't available
 const storage = window.storage || memoryStorage;
 
 // ============================================================================
@@ -81,6 +85,7 @@ async function saveEvent(username, event) {
   await saveUserData(username, userData);
   console.log('Event saved:', event);
   
+  // Sync with backend server for calendar feed
   await syncEventsToServer(username, userData.events);
   
   if (window.CalendarManager) {
@@ -100,6 +105,7 @@ async function updateEvent(username, eventId, updates) {
   userData.events[eventIndex] = { ...userData.events[eventIndex], ...updates };
   await saveUserData(username, userData);
   
+  // Sync with backend server
   await syncEventsToServer(username, userData.events);
   
   if (window.CalendarManager) {
@@ -116,6 +122,7 @@ async function deleteEvent(username, eventId) {
   userData.events = userData.events.filter(e => e.id !== eventId);
   await saveUserData(username, userData);
   
+  // Sync with backend server
   await syncEventsToServer(username, userData.events);
   
   if (window.CalendarManager) {
@@ -125,10 +132,21 @@ async function deleteEvent(username, eventId) {
   return true;
 }
 
+async function getServerBaseURL() {
+  // Determine the backend URL based on environment
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'http://localhost:5000';
+  } else {
+    // On deployed environment, use the same domain
+    return `${window.location.protocol}//${window.location.host}`;
+  }
+}
+
 async function syncEventsToServer(username, events) {
   try {
     const username_b64 = btoa(username);
-    const response = await fetch('http://localhost:5000/api/sync', {
+    const baseURL = await getServerBaseURL();
+    const response = await fetch(`${baseURL}/api/sync`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -154,6 +172,7 @@ async function getUserEvents(username) {
   return userData?.events || [];
 }
 
+// Export for use in other scripts
 window.getUserEvents = getUserEvents;
 window.saveEvent = saveEvent;
 window.updateEvent = updateEvent;
@@ -223,15 +242,24 @@ function loginUser(username) {
   
   document.getElementById('userDisplay').textContent = `👤 ${username}`;
   
+  // Show calendar link section in calendar sidebar with dynamic URL
   const calendarLinkSection = document.getElementById('calendarLinkSection');
   if (calendarLinkSection) {
     calendarLinkSection.style.display = 'block';
     const username_b64 = btoa(username);
-    const calendarUrl = `http://localhost:5000/calendar/${username_b64}.ics`;
-    document.getElementById('calendarLink').value = calendarUrl;
+    
+    // Get dynamic base URL
+    getServerBaseURL().then(baseURL => {
+      const calendarUrl = `${baseURL}/calendar/${username_b64}.ics`;
+      document.getElementById('calendarLink').value = calendarUrl;
+    }).catch(error => {
+      // Fallback to localhost
+      const calendarUrl = `http://localhost:5000/calendar/${username_b64}.ics`;
+      document.getElementById('calendarLink').value = calendarUrl;
+    });
   }
   
-  addMessage(`Welcome, ${username}! I'm ready to help you manage your calendar.`, 'ai');
+  addMessage(`👋 Welcome, ${username}! I'm Jarvis, here to help with your calendar.`, 'ai');
   
   if (window.CalendarManager) {
     window.CalendarManager.renderCalendar();
@@ -245,6 +273,7 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
   document.getElementById('userInfoSection').classList.remove('visible');
   document.getElementById('logoutBtn').classList.remove('visible');
   
+  // Hide calendar link section
   const calendarLinkSection = document.getElementById('calendarLinkSection');
   if (calendarLinkSection) {
     calendarLinkSection.style.display = 'none';
@@ -374,23 +403,25 @@ function speak(text) {
 }
 
 // ============================================================================
-// FIXED Date Parsing - Handles days of week, dates, etc.
+// ADVANCED Date Parsing - Handles days of week, dates, etc.
 // ============================================================================
 function parseDate(text) {
   const lower = text.toLowerCase();
   const now = new Date();
   
+  // Check for "tomorrow"
   if (/\btomorrow\b/i.test(text)) {
     const date = new Date(now);
     date.setDate(date.getDate() + 1);
     return date;
   }
   
+  // Check for "today"
   if (/\btoday\b/i.test(text)) {
     return new Date(now);
   }
   
-  // Days of the week
+  // Check for days of the week
   const daysOfWeek = {
     'sunday': 0, 'sun': 0,
     'monday': 1, 'mon': 1,
@@ -402,12 +433,12 @@ function parseDate(text) {
   };
   
   for (const [day, dayNum] of Object.entries(daysOfWeek)) {
-    const regex = new RegExp(`\\b${day}\\b`, 'i');
-    if (regex.test(text)) {
+    if (lower.includes(day)) {
       const targetDate = new Date(now);
       const currentDay = targetDate.getDay();
       let daysToAdd = dayNum - currentDay;
       
+      // If the day has passed this week, schedule for next week
       if (daysToAdd <= 0) {
         daysToAdd += 7;
       }
@@ -417,23 +448,24 @@ function parseDate(text) {
     }
   }
   
-  // FIXED: Specific date like "the 12th", "the 15th"
-  const dateMatch = text.match(/\b(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)\b/i);
+  // Check for specific date like "the 12th", "the 15th", "12th", "15th"
+  const dateMatch = text.match(/\b(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\b/i);
   if (dateMatch) {
     const day = parseInt(dateMatch[1]);
     if (day >= 1 && day <= 31) {
-      const targetDate = new Date(now.getFullYear(), now.getMonth(), day);
+      const targetDate = new Date(now);
+      targetDate.setDate(day);
       
       // If the date has passed this month, schedule for next month
       if (targetDate < now) {
         targetDate.setMonth(targetDate.getMonth() + 1);
       }
       
-      console.log(`📅 Parsed date: day ${day} → ${targetDate.toLocaleDateString()}`);
       return targetDate;
     }
   }
   
+  // Check for "next week", "next month"
   if (lower.includes('next week')) {
     const date = new Date(now);
     date.setDate(date.getDate() + 7);
@@ -446,16 +478,19 @@ function parseDate(text) {
     return date;
   }
   
+  // Default to today + 1 hour
   return null;
 }
 
 function parseTime(text) {
+  // Parse time like "at 3pm", "at 15:00", "at 3:30pm"
   const timeMatch = text.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
   if (timeMatch) {
     let hours = parseInt(timeMatch[1]);
     const minutes = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
     const meridiem = timeMatch[3] ? timeMatch[3].toLowerCase() : null;
     
+    // Convert to 24-hour format
     if (meridiem === 'pm' && hours < 12) hours += 12;
     if (meridiem === 'am' && hours === 12) hours = 0;
     
@@ -466,28 +501,33 @@ function parseTime(text) {
 }
 
 // ============================================================================
-// Event Parsing
+// STRICT Event Parsing - Only creates events with proper info
 // ============================================================================
 function parseEventCommand(text) {
   const lower = text.toLowerCase();
   
+  // Must have BOTH a trigger word AND event-related word
   const eventTriggers = ['create', 'schedule', 'add', 'make', 'set up', 'book', 'plan'];
   const eventWords = ['event', 'meeting', 'appointment', 'reminder'];
   
   const hasTrigger = eventTriggers.some(trigger => lower.includes(trigger));
   const hasEventWord = eventWords.some(word => lower.includes(word));
   
+  // Must have trigger word OR event word (not necessarily both now for flexibility)
   if (!hasTrigger && !hasEventWord) {
     return null;
   }
 
+  // Extract event title
   let summary = null;
   
+  // Method 1: Look for "called X" or "named X"
   const calledMatch = text.match(/(?:called|named|titled)\s+["']?([^"']+?)["']?(?:\s+(?:tomorrow|today|at|on|for|monday|tuesday|wednesday|thursday|friday|saturday|sunday|the)|$)/i);
   if (calledMatch) {
     summary = calledMatch[1].trim();
   }
   
+  // Method 2: Look for quoted text
   if (!summary) {
     const quoteMatch = text.match(/["']([^"']+)["']/);
     if (quoteMatch) {
@@ -495,6 +535,7 @@ function parseEventCommand(text) {
     }
   }
   
+  // Method 3: Extract text between trigger and date/time words
   if (!summary) {
     const dateTimeKeywords = ['tomorrow', 'today', 'next week', 'at ', 'on ', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'the '];
     
@@ -518,6 +559,7 @@ function parseEventCommand(text) {
       
       let extracted = text.substring(titleStart, titleEnd).trim();
       
+      // Clean up common filler words
       const fillers = ['please', 'can you', 'could you', 'a ', 'an ', 'the ', 'for me'];
       fillers.forEach(filler => {
         extracted = extracted.replace(new RegExp(`\\b${filler}\\b`, 'gi'), ' ');
@@ -531,21 +573,26 @@ function parseEventCommand(text) {
     }
   }
   
+  // STRICT CHECK: Must have a meaningful title (at least 2 characters)
   if (!summary || summary.length < 2) {
     console.log('❌ Event rejected: No valid title found');
     return null;
   }
 
+  // Parse date using advanced date parser
   let startTime = parseDate(text);
   if (!startTime) {
+    // Default to 1 hour from now if no date specified
     startTime = new Date();
     startTime.setHours(startTime.getHours() + 1, 0, 0, 0);
   }
   
+  // Parse time
   const timeInfo = parseTime(text);
   if (timeInfo.hasTime) {
     startTime.setHours(timeInfo.hours, timeInfo.minutes, 0, 0);
   } else {
+    // If no time specified, default to 10 AM if it's a future date, or +1 hour if today
     const now = new Date();
     if (startTime.toDateString() === now.toDateString()) {
       startTime.setHours(now.getHours() + 1, 0, 0, 0);
@@ -585,6 +632,7 @@ async function createEvent(eventData) {
     addMessage(msg, 'ai');
     speak(`Event ${eventData.summary} has been added to your calendar.`);
     
+    // Open calendar sidebar to show the event
     document.getElementById('calendarSidebar').classList.add('open');
   } catch (error) {
     console.error('Failed to create event:', error);
@@ -611,7 +659,7 @@ async function fetchWikipediaSummary(title) {
 }
 
 // ============================================================================
-// FIXED Event Management - Edit/Delete via typing
+// Event Management Commands (Edit/Delete)
 // ============================================================================
 async function handleDeleteEvent(text) {
   const events = await getUserEvents(currentUser);
@@ -621,6 +669,7 @@ async function handleDeleteEvent(text) {
     return;
   }
 
+  // Show list of events to delete
   let message = '🗑️ Which event would you like to delete? Reply with the number:<br><br>';
   events.forEach((event, index) => {
     const startDate = new Date(event.start);
@@ -630,6 +679,7 @@ async function handleDeleteEvent(text) {
   addMessage(message, 'ai');
   speak('Which event would you like to delete? Reply with the number.');
   
+  // Store state for next input
   window.pendingAction = { type: 'delete', events };
 }
 
@@ -641,6 +691,7 @@ async function handleEditEvent(text) {
     return;
   }
 
+  // Show list of events to edit
   let message = '✏️ Which event would you like to edit? Reply with the number:<br><br>';
   events.forEach((event, index) => {
     const startDate = new Date(event.start);
@@ -650,6 +701,7 @@ async function handleEditEvent(text) {
   addMessage(message, 'ai');
   speak('Which event would you like to edit? Reply with the number.');
   
+  // Store state for next input
   window.pendingAction = { type: 'edit', events };
 }
 
@@ -657,16 +709,9 @@ async function handlePendingAction(text) {
   if (!window.pendingAction) return false;
 
   const action = window.pendingAction;
-  
-  if (text.toLowerCase().includes('cancel') || text.toLowerCase().includes('nevermind')) {
-    window.pendingAction = null;
-    addMessage('Action cancelled.', 'ai');
-    speak('Cancelled');
-    return true;
-  }
-  
   const num = parseInt(text.trim());
   
+  // Check if user provided a valid number
   if (isNaN(num) || num < 1 || num > action.events.length) {
     addMessage('❌ Invalid number. Please try again or say "cancel".', 'ai');
     return true;
@@ -675,24 +720,19 @@ async function handlePendingAction(text) {
   const event = action.events[num - 1];
   
   if (action.type === 'delete') {
-    await deleteEvent(currentUser, event.id);
-    addMessage(`✅ Event "${event.summary}" has been deleted.`, 'ai');
-    speak(`Event ${event.summary} deleted`);
+    if (confirm(`Are you sure you want to delete "${event.summary}"?`)) {
+      await deleteEvent(currentUser, event.id);
+      addMessage(`✅ Event "${event.summary}" has been deleted.`, 'ai');
+      speak(`Event ${event.summary} deleted`);
+    }
     window.pendingAction = null;
     return true;
   }
   
   if (action.type === 'edit') {
-    addMessage(`✏️ What would you like to rename "${event.summary}" to?`, 'ai');
-    speak('What would you like to rename it to?');
-    window.pendingAction = { type: 'rename', event: event };
-    return true;
-  }
-  
-  if (action.type === 'rename') {
-    const newTitle = text.trim();
-    if (newTitle && newTitle.length > 0) {
-      await updateEvent(currentUser, action.event.id, { summary: newTitle });
+    const newTitle = prompt(`Edit event title for "${event.summary}":`, event.summary);
+    if (newTitle && newTitle !== event.summary) {
+      await updateEvent(currentUser, event.id, { summary: newTitle });
       addMessage(`✅ Event renamed to "${newTitle}".`, 'ai');
       speak(`Event renamed to ${newTitle}`);
     }
@@ -709,33 +749,62 @@ async function handlePendingAction(text) {
 async function handleInput(text) {
   const lower = text.toLowerCase();
 
-  // Check pending actions first
+  // =========================================================================
+  // GREETING LAYER - Respond naturally to greetings
+  // =========================================================================
+  const greetingPatterns = [
+    { pattern: /^(hello|hi|hey|greetings|welcome)[\s!.]*$/i, response: "👋 Hello! I'm Jarvis, your personal calendar assistant. What can I help you with?" },
+    { pattern: /^(how are you|how's it going|what's up)[\s!.]*$/i, response: "⚡ I'm running great! Ready to help you manage your calendar or answer questions." },
+    { pattern: /^(good morning|good afternoon|good evening)[\s!.]*$/i, response: "☀️ Good day! Let me help you with your calendar events." },
+    { pattern: /^(thank you|thanks|appreciate it)[\s!.]*$/i, response: "😊 Happy to help! Anything else you need?" }
+  ];
+
+  for (const { pattern, response } of greetingPatterns) {
+    if (pattern.test(text)) {
+      addMessage(response, 'ai');
+      speak(response.replace(/[^a-zA-Z\s]/g, ''));
+      return;
+    }
+  }
+
+  // =========================================================================
+  // Regular input handling continues
+  // =========================================================================
+
+  // Check if user is responding to a pending action
   if (window.pendingAction) {
+    // Allow cancel
+    if (lower.includes('cancel') || lower.includes('nevermind')) {
+      window.pendingAction = null;
+      addMessage('Action cancelled.', 'ai');
+      speak('Cancelled');
+      return;
+    }
+    
     const handled = await handlePendingAction(text);
     if (handled) return;
   }
 
-  // Delete command
-  if ((lower.includes('delete') || lower.includes('remove')) && 
-      (lower.includes('event') || lower.includes('meeting') || lower.includes('appointment'))) {
+  // Check for delete command
+  if (lower.includes('delete') && (lower.includes('event') || lower.includes('meeting') || lower.includes('appointment'))) {
     await handleDeleteEvent(text);
     return;
   }
 
-  // Edit command
-  if ((lower.includes('edit') || lower.includes('change') || lower.includes('rename')) && 
-      (lower.includes('event') || lower.includes('meeting') || lower.includes('appointment'))) {
+  // Check for edit command
+  if (lower.includes('edit') && (lower.includes('event') || lower.includes('meeting') || lower.includes('appointment'))) {
     await handleEditEvent(text);
     return;
   }
 
-  // Create event
+  // Check for calendar event creation - STRICT validation
   const eventData = parseEventCommand(text);
   if (eventData) {
     await createEvent(eventData);
     return;
   }
 
+  // If it looks like they tried to create an event but failed
   const eventAttempt = ['create', 'schedule', 'add', 'make'].some(word => lower.includes(word)) &&
                        ['event', 'meeting', 'appointment'].some(word => lower.includes(word));
   
@@ -745,7 +814,7 @@ async function handleInput(text) {
     return;
   }
 
-  // Poem
+  // Handle poem request
   if (lower.includes('poem')) {
     const response = `In circuits deep and wires bright,\nI dream in code through day and night.\nYou speak, I listen, thoughts arise,\nTogether we explore the skies.`;
     addMessage(response, 'ai');
@@ -753,7 +822,7 @@ async function handleInput(text) {
     return;
   }
 
-  // Wikipedia
+  // Handle Wikipedia queries
   if (/\b(what is|who is|tell me about|define)\b/i.test(text)) {
     const term = text.replace(/\b(what is|who is|tell me about|define)\b/gi, '').trim().replace(/\?/g, '');
     
@@ -773,7 +842,7 @@ async function handleInput(text) {
     }
   }
 
-  // Philosophy
+  // Philosophical questions
   if (lower.includes('trolley problem')) {
     const response = "The trolley problem is a thought experiment in ethics. It asks whether you would pull a lever to divert a runaway trolley onto a track with one person instead of five. This explores the tension between utilitarian ethics and deontological ethics.";
     addMessage(response, 'ai');
@@ -788,7 +857,7 @@ async function handleInput(text) {
     return;
   }
 
-  // Default
+  // Default response
   const response = `You said: "${text}". I'm processing that with my AI reasoning capabilities.`;
   addMessage(response, 'ai');
   speak("I'm thinking about that");
@@ -800,11 +869,13 @@ async function handleInput(text) {
 window.addEventListener('DOMContentLoaded', () => {
   addWelcomeMessage();
   
+  // Hide calendar link section initially
   const calendarLinkSection = document.getElementById('calendarLinkSection');
   if (calendarLinkSection) {
     calendarLinkSection.style.display = 'none';
   }
   
+  // Initialize calendar if available
   if (window.CalendarManager) {
     window.CalendarManager.init();
   }

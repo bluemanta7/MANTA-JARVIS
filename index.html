@@ -62,10 +62,11 @@
         <div class="help-section">
           <h3>What I can do:</h3>
           <ul>
-            <li><strong>📅 Calendar:</strong> "Create event tomorrow workout at 3pm"</li>
+            <li><strong>📅 Calendar:</strong> "Create event workout Wednesday at 6am"</li>
+            <li><strong>🗑️ Delete:</strong> "Delete event" (I'll ask which one)</li>
+            <li><strong>✏️ Edit:</strong> "Edit event" (I'll ask which one)</li>
             <li><strong>📚 Wikipedia:</strong> "What is quantum computing?"</li>
             <li><strong>💭 Philosophy:</strong> "Tell me about the trolley problem"</li>
-            <li><strong>✨ Creative:</strong> "Tell me a poem"</li>
           </ul>
         </div>
       </div>
@@ -76,16 +77,21 @@
       <div class="calendar-header">
         <h2>📅 My Calendar</h2>
         
-        <!-- Calendar Link Section (moved here) -->
-        <div class="calendar-link-section" id="calendarLinkSection">
-          <p style="font-size: 12px; color: #aaa; margin: 10px 0 5px 0;">Your Calendar Feed:</p>
-          <div class="calendar-link-input">
-            <input type="text" id="calendarLink" readonly>
-            <button id="copyLinkBtn">Copy</button>
+        <!-- Calendar Link Section - Improved UX -->
+        <div class="calendar-link-section" id="calendarLinkSection" style="display: none;">
+          <div style="background: rgba(0, 188, 212, 0.1); padding: 10px; border-radius: 5px; margin: 10px 0; border-left: 3px solid #00bcd4;">
+            <p style="font-size: 12px; color: #7dd3fc; margin: 0 0 8px 0; font-weight: bold;">
+              📌 Google Calendar Link
+            </p>
+            <div class="calendar-link-input">
+              <input type="text" id="calendarLink" readonly style="flex: 1; padding: 8px; background: rgba(0, 0, 0, 0.3); border: 1px solid #00bcd4; color: #00ffff; border-radius: 3px; font-size: 12px;">
+              <button id="copyLinkBtn" style="padding: 8px 12px; background: #00bcd4; color: white; border: none; border-radius: 3px; cursor: pointer; font-weight: bold; margin-left: 5px;">Copy</button>
+            </div>
+            <p style="font-size: 11px; color: #7dd3fc; margin-top: 8px; margin-bottom: 0;">
+              ✨ Paste in Google Calendar → "Other calendars" → "From URL"<br>
+              ✨ Your events will sync automatically!
+            </p>
           </div>
-          <p style="font-size: 11px; color: #888; margin-top: 5px;">
-            Add this to Google Calendar or any calendar app
-          </p>
         </div>
         
         <div class="calendar-nav">
@@ -97,8 +103,8 @@
 
       <div class="calendar-grid" id="calendarGrid"></div>
 
-      <div style="padding: 15px; background-color: #252525; border-top: 1px solid #444;">
-        <h3 style="color: #4CAF50; margin-bottom: 10px;">Upcoming Events</h3>
+      <div style="padding: 15px; background-color: #1a5f7a; border-top: 1px solid #00bcd4;">
+        <h3 style="color: #00bcd4; margin: 0; font-size: 14px;">📋 Upcoming Events</h3>
       </div>
 
       <div class="event-list" id="eventList"></div>
@@ -113,9 +119,3 @@
   <script src="app.js"></script>
 </body>
 </html>
-
-<!-- 
-
-Ok event created, it shows the buttons to edit and delete, but I personally want to be able to type edit and delete any event we choose. So if we say delete event, it should always ask for clarification. Also after creating some events on the website calendar, when I clicked copy link and added it to my google calendar, nothing appeared on google calendar. Also I typed create another event called test for Wednesday the 12th and it said ✅ Event "test" created for 11/11/2025 at 12:00 AM. Which means it cannot process days and dates for some reason. We must implement each day and tell it to add event to nearest day unless stated otherwise, and when using numbers signifying the day of month like the 12th meaning the 12th of this month.
- 
--->

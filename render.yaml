@@ -1,15 +1,15 @@
 services:
   - type: web
-    name: manta-jarvis-calendar
+    name: manta-jarvis
     env: python
     region: oregon
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python serve_ics.py
+    startCommand: gunicorn calendar_server:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11
       - key: DEBUG
-        value: false
-      - key: PORT
-        value: 5000
+        value: 'False'
+      - key: FLASK_ENV
+        value: production
