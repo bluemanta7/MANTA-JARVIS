@@ -132,23 +132,11 @@ async function deleteEvent(username, eventId) {
   return true;
 }
 
-const RENDER_BASE_URL = "https://manta-jarvis.onrender.com";
+const BACKEND_URL = "https://manta-jarvis.onrender.com";
 
 async function getServerBaseURL() {
-  const host = window.location.hostname;
-
-  // If loaded from file:// or any non-localhost environment, force Render
-  if (!host || host === "" || window.location.protocol === "file:") {
-    return RENDER_BASE_URL;
-  }
-
-  // Local development
-  if (host === "localhost" || host === "127.0.0.1") {
-    return "http://localhost:5000";
-  }
-
-  // If your frontend is ever actually hosted, use its domain
-  return `${window.location.protocol}//${window.location.host}`;
+  // Always use the Render backend
+  return BACKEND_URL;
 }
 
 
@@ -260,14 +248,8 @@ function loginUser(username) {
   if (calendarLinkSection) {
     calendarLinkSection.style.display = 'block';
     const username_b64 = btoa(username);
-    
-    // Get dynamic base URL
-    getServerBaseURL().then(baseURL => {
-  const calendarUrl = `${baseURL}/calendar/${username_b64}.ics`;
-  document.getElementById('calendarLink').value = calendarUrl;
-});
-
-
+    const calendarUrl = `${BACKEND_URL}/calendar/${username_b64}.ics`;
+    document.getElementById('calendarLink').value = calendarUrl;
   }
   
   addMessage(`👋 Welcome, ${username}! I'm Jarvis, here to help with your calendar.`, 'ai');
