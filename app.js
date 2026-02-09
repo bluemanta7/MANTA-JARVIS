@@ -255,6 +255,11 @@ function loginUser(username) {
     window.CalendarManager.renderCalendar();
     window.CalendarManager.loadEvents();
   }
+  
+  // Sync existing events to backend on login
+  getUserEvents(username).then(events => {
+    syncEventsToServer(username, events);
+  });
 }
 
 document.getElementById('logoutBtn').addEventListener('click', () => {
