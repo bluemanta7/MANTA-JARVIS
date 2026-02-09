@@ -134,11 +134,6 @@ async function deleteEvent(username, eventId) {
 
 const BACKEND_URL = "https://manta-jarvis.onrender.com";
 
-async function getServerBaseURL() {
-  // Always use the Render backend
-  return BACKEND_URL;
-}
-
 
 
 
@@ -146,8 +141,7 @@ async function getServerBaseURL() {
 async function syncEventsToServer(username, events) {
   try {
     const username_b64 = btoa(username);
-    const baseURL = await getServerBaseURL();
-    const response = await fetch(`${baseURL}/api/sync`, {
+    const response = await fetch(`${BACKEND_URL}/api/sync`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
