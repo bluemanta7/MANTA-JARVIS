@@ -49,6 +49,9 @@ const memoryStorage = {
 // Use memory storage if window.storage isn't available
 const storage = window.storage || memoryStorage;
 
+// Global TTS mute state
+let ttsMuted = false;
+
 // ============================================================================
 // Persistent Storage Functions
 // ============================================================================
@@ -382,10 +385,15 @@ function addWelcomeMessage() {
   addMessage(welcomeMsg, 'ai welcome');
 }
 
+function muteTTS() { ttsMuted = true; }
+function unmuteTTS() { ttsMuted = false; }
+
 function speak(text) {
   if ('speechSynthesis' in window) {
     const utterance = new SpeechSynthesisUtterance(text);
-    speechSynthesis.speak(utterance);
+    if (!ttsMuted) {
+      speechSynthesis.speak(utterance);
+    }
   }
 }
 

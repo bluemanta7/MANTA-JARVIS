@@ -1,4 +1,5 @@
 from flask import Flask, Response, request, jsonify
+from flask_cors import CORS
 from datetime import datetime, timedelta
 import uuid
 import json
@@ -6,6 +7,7 @@ import os
 import base64
 
 app = Flask(__name__)
+CORS(app, origins=["https://bluemanta7.github.io"])
 
 # ============================================================================
 # Storage
