@@ -74,14 +74,20 @@ def events_to_ics(events: list) -> str:
     
     for event in events:
         try:
-            # Parse ISO 8601 timestamps
-            start_dt = datetime.fromisoformat(event.get("start", "").replace("Z", "+00:00"))
-            end_dt = datetime.fromisoformat(event.get("end", "").replace("Z", "+00:00"))
-            
+            # Parse ISO 8601 timestamps robustly (handles formats like 2026-02-16T15:00:00.000Z)
+            start_raw = event.get("start", "")
+            end_raw = event.get("end", "")
+
+            start_clean = start_raw.replace("Z", "").split(".")[0]
+            end_clean = end_raw.replace("Z", "").split(".")[0]
+
+            start_dt = datetime.fromisoformat(start_clean)
+            end_dt = datetime.fromisoformat(end_clean)
+
             summary = event.get("summary", "Untitled Event")
             description = event.get("description", "")
             location = event.get("location", "")
-            
+
             ics_event = make_event(summary, start_dt, end_dt, description, location)
             ics_events.append(ics_event)
         except Exception as e:
